@@ -2,7 +2,7 @@
 
 Record Claude Code session transcripts and link them to the git commits they produced.
 
-> **Status: early development.** Local capture works: a Claude Code `Stop` hook snapshots the transcript, and a git hook adds `Session:` and `Transcript:` trailers. Secrets are redacted before anything is written. Read commands exist (`sessions show`, `commits`, `list`). Commit trailers are handled for amend, squash, cherry-pick, rebase and revert. Forks, `doctor`, `prune` and the notes index are not built yet. The live Claude Code run has not been verified.
+> **Status: early development.** Local capture works: a Claude Code `Stop` hook snapshots the transcript, and a git hook adds `Session:` and `Transcript:` trailers. Secrets are redacted before anything is written. Read commands exist (`sessions show`, `commits`, `list`). Commit trailers are handled for amend, squash, cherry-pick, rebase and revert. `fork`, `doctor` and `prune` exist. Remote push and pull, and the notes index, are not built yet. The live Claude Code run has not been verified.
 
 ## What it will do
 
@@ -44,6 +44,17 @@ node /path/to/session-logs/src/cli/sessions.ts show <rev> --raw   # redacted JSO
 ```
 
 `show` renders only conversation turns. The raw output includes every stored entry.
+
+Maintenance:
+
+```sh
+node /path/to/session-logs/src/cli/sessions.ts fork <session> --at <snapshot>
+node /path/to/session-logs/src/cli/sessions.ts doctor
+node /path/to/session-logs/src/cli/sessions.ts prune --older-than 30            # dry run
+node /path/to/session-logs/src/cli/sessions.ts prune --older-than 30 --apply    # delete
+```
+
+`prune` is off unless you pass `--older-than` or set `prune.olderThanDays` in `.session-logs/config.json`. It keeps sessions that commits link to, unless you pass `--include-linked`. Pruning a linked session makes `show` fail for those commits.
 
 ## Remote storage (Azure Blob)
 

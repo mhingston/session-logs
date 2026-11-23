@@ -28,7 +28,7 @@ export interface SegmentRef {
 export interface Manifest {
   schema_version: number;
   session_id: string;
-  parent: null;
+  parent: { session_id: string; snapshot: string } | null;
   segments: SegmentRef[];
   source: { agent: "claude-code"; transcript_path: string };
   includes_subagents: false;
@@ -46,6 +46,7 @@ export interface SessionIndex {
 export interface ActiveSession {
   session_id: string;
   transcript_path: string;
+  first_stop_at: string;
   last_stop_at: string;
 }
 
@@ -96,8 +97,14 @@ export function recordActiveSession(
 ): void {
   const dir = join(sessionLogsRoot(repoRoot), "active");
   mkdirSync(dir, { recursive: true });
-  const record: ActiveSession = { ...session, last_stop_at: now.toISOString() };
-  writeFileAtomic(join(dir, `${session.session_id}.json`), JSON.stringify(record, null, 2) + "\n");
+  const file = join(dir, `${session.session_id}.json`);
+  const previous = readJson<ActiveSession>(file);
+  const record: ActiveSession = {
+    ...session,
+    first_stop_at: previous?.first_stop_at ?? now.toISOString(),
+    last_stop_at: now.toISOString(),
+  };
+  writeFileAtomic(file, JSON.stringify(record, null, 2) + "\n");
 }
 
 export function allActiveSessions(repoRoot: string): ActiveSession[] {

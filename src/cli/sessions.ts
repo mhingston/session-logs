@@ -3,7 +3,11 @@
 //   sessions commits <session>    commits linked to a session
 //   sessions list                 sessions recorded in this repository
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { commitsForSession, listSessions, renderSnapshot, snapshotForCommit } from "../read/read.ts";
+import { sessionLogsRoot } from "../capture/capture.ts";
+import { doctor, forkSession, pruneSessions } from "../maintain/maintain.ts";
 
 function git(args: string[]): string | undefined {
   try {
@@ -14,7 +18,10 @@ function git(args: string[]): string | undefined {
 }
 
 function usage(): void {
-  console.error("usage: sessions show <rev> [--raw] | sessions commits <session> | sessions list");
+  console.error(
+    "usage: sessions show <rev> [--raw] | commits <session> | list | fork <session> --at <snapshot>\n" +
+      "       sessions doctor | prune [--older-than <days>] [--include-linked] [--apply]",
+  );
   process.exitCode = 2;
 }
 
@@ -76,7 +83,44 @@ function main(argv: string[]): void {
     }
     return;
   }
+  if (command === "fork") {
+    const at = rest[rest.indexOf("--at") + 1];
+    const session = rest[0];
+    if (!session || rest.indexOf("--at") === -1 || !at) return usage();
+    const result = forkSession(repoRoot, session, at);
+    console.log(`forked session ${result.session_id}`);
+    console.log(`first snapshot ${result.snapshot}`);
+    return;
+  }
+  if (command === "doctor") {
+    for (const finding of doctor(repoRoot)) {
+      console.log(`${finding.level.padEnd(5)} ${finding.message}`);
+    }
+    return;
+  }
+  if (command === "prune") {
+    const flagIndex = rest.indexOf("--older-than");
+    const flagDays = flagIndex === -1 ? undefined : Number(rest[flagIndex + 1]);
+    const configFile = join(sessionLogsRoot(repoRoot), "config.json");
+    const configDays = existsSync(configFile)
+      ? (JSON.parse(readFileSync(configFile, "utf8")).prune?.olderThanDays as number | undefined)
+      : undefined;
+    const plan = pruneSessions(repoRoot, {
+      olderThanDays: flagDays ?? configDays,
+      apply: rest.includes("--apply"),
+      includeLinked: rest.includes("--include-linked"),
+    });
+    console.log(`${plan.applied ? "pruned" : "would prune"} ${plan.sessions.length} session(s), ${plan.snapshots} snapshot(s), ${plan.objects} object(s)`);
+    for (const session of plan.sessions) console.log(`  ${session}`);
+    if (!plan.applied) console.log("dry run: pass --apply to delete");
+    return;
+  }
   usage();
 }
 
-main(process.argv.slice(2));
+try {
+  main(process.argv.slice(2));
+} catch (error) {
+  console.error(`sessions: ${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 1;
+}
