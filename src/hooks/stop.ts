@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { recordActiveSession, sessionLogsRoot, snapshotTranscript } from "../capture/capture.ts";
+import { decisionsEnabled, generateDecisions } from "../decisions/decisions.ts";
 
 interface StopInput {
   session_id: string;
@@ -36,6 +37,7 @@ function logError(repoRoot: string, message: string): void {
 
 function main(): void {
   let repoRoot = resolveRepoRoot(process.cwd());
+  let snapshot: string | undefined;
   try {
     const input = JSON.parse(readFileSync(0, "utf8")) as StopInput;
     if (input.cwd) {
@@ -44,13 +46,24 @@ function main(): void {
     if (!input.session_id || !input.transcript_path) {
       throw new Error("hook input missing session_id or transcript_path");
     }
-    snapshotTranscript(repoRoot, input.session_id, input.transcript_path);
+    snapshot = snapshotTranscript(repoRoot, input.session_id, input.transcript_path);
     recordActiveSession(repoRoot, {
       session_id: input.session_id,
       transcript_path: input.transcript_path,
     });
   } catch (error) {
     logError(repoRoot, error instanceof Error ? error.message : String(error));
+  }
+  // Decision extraction is a separate opt-in layer (D21): it runs only when the
+  // repository enables it, and a failure here never affects the capture above.
+  if (snapshot !== undefined) {
+    try {
+      if (decisionsEnabled(repoRoot)) {
+        generateDecisions(repoRoot, snapshot);
+      }
+    } catch (error) {
+      logError(repoRoot, `decisions: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   process.exitCode = 0;
 }
