@@ -1,0 +1,13 @@
+{
+  "name": "session-logs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Record Claude Code session transcripts and link them to git commits",
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  }
+}

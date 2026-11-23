@@ -1,0 +1,24 @@
+# session-logs decision log (draft, pending repo creation)
+
+Supersedes the handoff's D1, D3, D6, D9 (partly), D11 where noted.
+
+| Date | ID | Decision | Reason |
+|---|---|---|---|
+| 2026-11-23 | D17 | Local store root is `.session-logs/` inside each repository, gitignored by default. It replaces the `refs/sessions/*` store as the source of truth. | Owner decision. Transcripts stay out of git history. Supersedes D1. |
+| 2026-11-23 | D18 | Remote storage is object storage only, opt-in per repository. Azure Blob Storage is the first provider. | Owner decision. Supersedes D11 for transcripts. |
+| 2026-11-23 | D19 | Storage, agent-hook and capture code sit behind provider-agnostic interfaces. Claude Code is the only agent adapter. Azure Blob is the only storage adapter. | Owner requirement. Keeps Azure and Claude Code out of the core model. |
+| 2026-11-23 | D20 | Snapshot identity is a content hash (sha256 of the manifest), not a git commit SHA. The `Transcript:` trailer carries that hash. | Needed once transcripts leave git. Supersedes D3 and D6 in part. |
+| 2026-11-23 | D21 | Capture is opt-in per repository and off by default. Decision summaries are a separate opt-in layer. A deterministic extract ships in MVP. An LLM summary stays P1. | Owner accepted recommendation (Q3). |
+| 2026-11-23 | D22 | Access tiers are out of MVP. Object-store containers or prefixes keep a clean boundary so tiers can be added later. | Owner accepted recommendation (Q4). |
+| 2026-11-23 | D23 | Subagent transcripts are out of MVP. Manifest carries `includes_subagents: false`. | Owner accepted recommendation (Q5). Confirm in M0. |
+| 2026-11-23 | D24 | Redaction runs before any write. A match blocks upload to the remote, with a logged override. Local-only capture warns. Best effort, documented as such. | Owner accepted recommendation (Q6). |
+| 2026-11-23 | D25 | Pruning is configurable and off by default. Operates at session granularity. Remote pruning is a separate explicit action. | Owner accepted recommendation (Q7). |
+| 2026-11-23 | D26 | Hook failures warn and never block the commit. Errors are logged locally, without transcript content. | Owner accepted recommendation (Q10); matches handoff test 11. |
+| 2026-11-23 | D27 | Audience includes engineers, reviewers and auditors. Retention and formatting must support audit use. | Owner answer (Q9). |
+| 2026-11-23 | D28 | Language is TypeScript. Location is `~/Downloads/session-logs`. | Owner answer (Q1). Note: not a git repo yet; see blocker. |
+
+| 2026-11-23 | D29 | Azure Blob adapter is written and tested, but disabled by default. No container is configured or used until the owner enables it per repository. | Owner decision: build and test now, do not use yet. |
+| 2026-11-23 | D30 | Trailer writes use `--if-exists replace` for amend and commit, `addIfDifferent` for squash. `replaceIfDifferent` is not a valid git value. | Verified on git 2.56.1. Corrects handoff §5. |
+| 2026-11-23 | D31 | Local store directory is `.session-logs/` (renamed from `.sessionlogs/`). | Owner request. Supersedes the name in D17. |
+
+Open: object-store container owner, and whether the `Transcript:` hash format is final (D20).
