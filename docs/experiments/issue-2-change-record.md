@@ -85,6 +85,27 @@ This is the "smallest next increment" from section 6, run on one private reposit
 
 **Setup:** an Orca-launched Claude Code chat was given a bounded brief: one small change on a new local branch, two or three commits, no push, no PR, and no staging of the session-logs setup files. The branch was based on `origin/main`.
 
+**Exact workflow (placeholders in angle brackets):**
+
+```sh
+# 1. Install session-logs once per repository (writes hooks and .claude/settings.local.json).
+node <session-logs>/src/cli/init.ts                         # run in <repo>
+node <session-logs>/src/cli/sessions.ts doctor              # expect no warnings
+
+# 2. Launch the Claude Code chat in the repository's main worktree.
+orca agent launch --agent claude --worktree id:<repoId>::<repoPath> --prompt "<bounded brief>" --json
+
+# 3. Wait until the agent reports done (poll agent list; no fixed sleep).
+orca agent list --json                                      # state: working -> done
+
+# 4. Read the link back from the repository.
+node <session-logs>/src/cli/sessions.ts commits <session-id>
+node <session-logs>/src/cli/sessions.ts doctor
+node <session-logs>/src/cli/sessions.ts show HEAD
+```
+
+Steps 1 to 4 are the whole workflow. Each push and PR was a separate, explicit approval; none was automated.
+
 **Result:**
 
 | Check | Result |
