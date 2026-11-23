@@ -28,6 +28,7 @@ def probe_cmd(name, extra=""):
 hooks = settings.setdefault("hooks", {})
 hooks.setdefault("SessionStart", []).append({"hooks": [{"type": "command", "command": probe_cmd("sessionstart")}]})
 hooks.setdefault("Stop", []).append({"hooks": [{"type": "command", "command": probe_cmd("stop", "echo PROBE_STOP_STDERR_MARKER >&2;")}]})
+hooks.setdefault("UserPromptSubmit", []).append({"hooks": [{"type": "command", "command": probe_cmd("prompt")}]})
 json.dump(settings, open(path, "w"), indent=2)
 PY
 
@@ -54,6 +55,10 @@ print("\n== SessionStart payloads (field names and source only)")
 for f in sorted(glob.glob(os.path.join(probe, "*-sessionstart.json"))):
     d = json.load(open(f))
     print(f"  source={d.get('source')!r} session_id={d.get('session_id')!r} keys={sorted(d.keys())}")
+print("\n== UserPromptSubmit payloads (field names only)")
+for f in sorted(glob.glob(os.path.join(probe, "*-prompt.json"))):
+    d = json.load(open(f))
+    print(f"  keys={sorted(d.keys())}")
 print("\n== Stop payloads (field names only)")
 for f in sorted(glob.glob(os.path.join(probe, "*-stop.json"))):
     d = json.load(open(f))

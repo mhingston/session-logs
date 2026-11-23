@@ -8,8 +8,8 @@
 // directly. Installation refuses to replace a repo-local core.hooksPath it did
 // not set, because that would silently disable Husky or similar tooling.
 //
-// Claude Code: a Stop hook is registered in .claude/settings.local.json (per
-// developer, not committed).
+// Claude Code: Stop and UserPromptSubmit hooks are registered in
+// .claude/settings.local.json (per developer, not committed).
 
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -71,19 +71,19 @@ function ensureLine(path: string, line: string): void {
   }
 }
 
-function registerStopHook(settingsFile: string, toolRoot: string): void {
+function registerHook(settingsFile: string, toolRoot: string, event: string, script: string): void {
   mkdirSync(dirname(settingsFile), { recursive: true });
   const settings = existsSync(settingsFile)
     ? (JSON.parse(readFileSync(settingsFile, "utf8")) as Record<string, unknown>)
     : {};
   const hooks = (settings.hooks ?? {}) as Record<string, Array<{ hooks: Array<{ type: string; command: string }> }>>;
-  const command = `node ${sh(join(toolRoot, "src/hooks/stop.ts"))}`;
-  const stop = hooks.Stop ?? [];
-  const already = stop.some((group) => group.hooks.some((hook) => hook.command === command));
+  const command = `node ${sh(join(toolRoot, script))}`;
+  const groups = hooks[event] ?? [];
+  const already = groups.some((group) => group.hooks.some((hook) => hook.command === command));
   if (!already) {
-    stop.push({ hooks: [{ type: "command", command }] });
+    groups.push({ hooks: [{ type: "command", command }] });
   }
-  hooks.Stop = stop;
+  hooks[event] = groups;
   settings.hooks = hooks;
   writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + "\n");
 }
@@ -118,7 +118,8 @@ export function installHooks(options: InstallOptions): InstallResult {
   ensureLine(join(repoRoot, ".gitignore"), ".claude/settings.local.json");
 
   const settingsFile = join(repoRoot, ".claude", "settings.local.json");
-  registerStopHook(settingsFile, toolRoot);
+  registerHook(settingsFile, toolRoot, "Stop", "src/hooks/stop.ts");
+  registerHook(settingsFile, toolRoot, "UserPromptSubmit", "src/hooks/user-prompt-submit.ts");
 
   return { hooksPath: ourHooksDir, shims, settingsFile };
 }

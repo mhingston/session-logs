@@ -5,7 +5,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { installHooks } from "../src/install/install.ts";
-import { recordActiveSession } from "../src/capture/capture.ts";
+import { recordActiveSession, recordTurnOpen } from "../src/capture/capture.ts";
 import { commitsForSession } from "../src/read/read.ts";
 
 const TOOL_ROOT = resolve(new URL(".", import.meta.url).pathname, "..");
@@ -165,5 +165,35 @@ test("a --no-verify commit is still linked to the session (D42)", () => {
   git(repo, ["add", "nv.txt"]);
   git(repo, ["commit", "-q", "--no-verify", "-m", "No verify"], iso("10:20"));
   assert.deepEqual(trailerLines(repo).filter((l) => l.startsWith("Session: ")), ["Session: nv-s"]);
+  cleanup(repo);
+});
+
+function openTurn(repo: string, sessionId: string, transcriptPath: string, when: Date): void {
+  // Same record the UserPromptSubmit hook writes (D50). Open-turn age is measured
+  // against the real clock, so the turn start must be relative to now.
+  recordTurnOpen(repo, { session_id: sessionId, transcript_path: transcriptPath }, when);
+}
+
+test("commits made during an open turn link to that session, however many there are (D50)", () => {
+  const repo = setupRepo();
+  const t = transcript(repo, "turn", "mid-turn work");
+  commit(repo, "base.txt", "Base", "10:00");
+  // Turn starts; no Stop has happened yet, and two commits land in this turn.
+  openTurn(repo, "mid-s", t, new Date(Date.now() - 10 * 60 * 1000));
+  commit(repo, "one.txt", "First in turn", "10:15");
+  commit(repo, "two.txt", "Second in turn", "10:20");
+  const links = commitsForSession(repo, "mid-s");
+  assert.equal(links.length, 2);
+  assert.ok(links.every((l) => l.relation === "primary"));
+  cleanup(repo);
+});
+
+test("an open turn past the maximum age no longer claims commits", () => {
+  const repo = setupRepo();
+  const t = transcript(repo, "stale", "interrupted turn");
+  commit(repo, "base.txt", "Base", "10:00");
+  openTurn(repo, "stale-s", t, new Date(Date.now() - 3 * 60 * 60 * 1000)); // interrupted: no Stop will follow
+  commit(repo, "later.txt", "Much later, outside Claude", "14:00");
+  assert.equal(commitsForSession(repo, "stale-s").length, 0);
   cleanup(repo);
 });

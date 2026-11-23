@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { allActiveSessions, sessionLogsRoot, type Manifest, type SessionIndex } from "../capture/capture.ts";
+import { activityAt, allActiveSessions, sessionLogsRoot, type Manifest, type SessionIndex } from "../capture/capture.ts";
 import { sha256Hex } from "../storage/object-store.ts";
 import { readSnapshotLines, readManifest, commitsForSession } from "../read/read.ts";
 
@@ -92,8 +92,12 @@ export function doctor(repoRoot: string): Finding[] {
     findings.push({ level: "warn", message: "commit hooks are not installed in this repository (run init)" });
   }
   const settings = join(repoRoot, ".claude", "settings.local.json");
-  if (!existsSync(settings) || !readFileSync(settings, "utf8").includes("stop.ts")) {
+  const settingsText = existsSync(settings) ? readFileSync(settings, "utf8") : "";
+  if (!settingsText.includes("stop.ts")) {
     findings.push({ level: "warn", message: "Stop hook is not registered in .claude/settings.local.json (run init)" });
+  }
+  if (!settingsText.includes("user-prompt-submit.ts")) {
+    findings.push({ level: "warn", message: "UserPromptSubmit hook is not registered; commits made mid-turn will not link (run init)" });
   }
   if (existsSync(join(root, "errors.log"))) {
     const count = readFileSync(join(root, "errors.log"), "utf8").split("\n").filter(Boolean).length;
@@ -140,7 +144,7 @@ export function doctor(repoRoot: string): Finding[] {
     }
     if (sessions.length === 0) {
       const t = Date.parse(committed);
-      const during = activeSessions.find((s) => Date.parse(s.first_stop_at) <= t && t <= Date.parse(s.last_stop_at));
+      const during = activeSessions.find((s) => Date.parse(s.first_stop_at) <= t && t <= Date.parse(activityAt(s)));
       if (during) {
         unlinkedDuringSession += 1;
         findings.push({

@@ -48,9 +48,16 @@ export interface SessionIndex {
 export interface ActiveSession {
   session_id: string;
   transcript_path: string;
+  // First time this session was seen in the repository (prompt or stop).
   first_stop_at: string;
-  last_stop_at: string;
+  last_stop_at?: string;
+  // Set on UserPromptSubmit; cleared in effect by a later Stop (D50).
+  turn_open_at?: string;
 }
+
+// An open turn with no Stop is treated as ended after this long. Stop does not run
+// when a turn is interrupted, so without a limit an interrupted turn would stay open.
+export const TURN_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
 export function sessionLogsRoot(repoRoot: string): string {
   return join(repoRoot, ".session-logs");
@@ -116,11 +123,44 @@ export function recordActiveSession(
   const file = join(dir, `${session.session_id}.json`);
   const previous = readJson<ActiveSession>(file);
   const record: ActiveSession = {
+    ...previous,
     ...session,
     first_stop_at: previous?.first_stop_at ?? now.toISOString(),
     last_stop_at: now.toISOString(),
   };
   writeFileAtomic(file, JSON.stringify(record, null, 2) + "\n");
+}
+
+// Records that a turn has started (UserPromptSubmit). Commits made while the turn
+// is open link to this session (D50).
+export function recordTurnOpen(
+  repoRoot: string,
+  session: { session_id: string; transcript_path: string },
+  now: Date = new Date(),
+): void {
+  const dir = join(sessionLogsRoot(repoRoot), "active");
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `${session.session_id}.json`);
+  const previous = readJson<ActiveSession>(file);
+  const record: ActiveSession = {
+    ...previous,
+    ...session,
+    first_stop_at: previous?.first_stop_at ?? now.toISOString(),
+    turn_open_at: now.toISOString(),
+  };
+  writeFileAtomic(file, JSON.stringify(record, null, 2) + "\n");
+}
+
+// Most recent activity for ordering: a stop, or the start of an open turn.
+export function activityAt(record: ActiveSession): string {
+  return [record.last_stop_at, record.turn_open_at].filter((t): t is string => t !== undefined).sort().pop() ?? record.first_stop_at;
+}
+
+function turnIsOpen(record: ActiveSession, nowMs: number): boolean {
+  if (!record.turn_open_at) return false;
+  const opened = Date.parse(record.turn_open_at);
+  const stopped = record.last_stop_at ? Date.parse(record.last_stop_at) : -Infinity;
+  return opened > stopped && nowMs - opened < TURN_MAX_AGE_MS;
 }
 
 export function allActiveSessions(repoRoot: string): ActiveSession[] {
@@ -132,19 +172,26 @@ export function allActiveSessions(repoRoot: string): ActiveSession[] {
     .filter((name) => name.endsWith(".json"))
     .map((name) => readJson<ActiveSession>(join(dir, name)))
     .filter((record): record is ActiveSession => record !== undefined)
-    .sort((a, b) => Date.parse(b.last_stop_at) - Date.parse(a.last_stop_at));
+    .sort((a, b) => Date.parse(activityAt(b)) - Date.parse(activityAt(a)));
 }
 
 // Sessions that stopped after `since` (exclusive), most recent first.
 // With no `since` (no earlier commit), only the single most recent session.
-export function candidateSessions(repoRoot: string, since?: string): ActiveSession[] {
+export function candidateSessions(repoRoot: string, since?: string, now: Date = new Date()): ActiveSession[] {
   const all = allActiveSessions(repoRoot);
+  // A commit made during one or more open turns belongs to those sessions (D50).
+  const open = all.filter((record) => turnIsOpen(record, now.getTime()));
+  if (open.length > 0) {
+    return open.sort((a, b) => Date.parse(b.turn_open_at!) - Date.parse(a.turn_open_at!));
+  }
+  // Otherwise: sessions that stopped since the previous commit (D36).
+  const stopped = all.filter((record) => record.last_stop_at !== undefined);
   if (since === undefined) {
-    return all.slice(0, 1);
+    return stopped.slice(0, 1);
   }
   // Compare parsed times: git gives offset timestamps, we store UTC with milliseconds.
   const sinceMs = Date.parse(since);
-  return all.filter((record) => Date.parse(record.last_stop_at) > sinceMs);
+  return stopped.filter((record) => Date.parse(record.last_stop_at!) > sinceMs);
 }
 
 // Takes a snapshot of the transcript. Returns the existing snapshot when the
