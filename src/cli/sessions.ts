@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { commitsForSession, listSessions, renderSnapshot, snapshotsForCommit } from "../read/read.ts";
 import { sessionLogsRoot } from "../capture/capture.ts";
 import { doctor, forkSession, pruneSessions } from "../maintain/maintain.ts";
+import { decisionsEnabled, generateDecisions } from "../decisions/decisions.ts";
 import { readNote, rebuildNotes } from "../notes/notes.ts";
 
 function git(args: string[]): string | undefined {
@@ -25,6 +26,7 @@ const HELP = [
   "  list [--full]                               List recorded sessions (use --full for 64-char snapshot IDs)",
   "  show <rev> [--raw] [--session <id>]         Show transcript(s) linked to a commit",
   "  commits <session-id>                        List commits linked to a session",
+  "  decisions <rev> [--session <id>] [--json]   Deterministic decision extract for a commit's transcript (opt-in, D21)",
   "  notes show <rev>                            Show the git note for a commit",
   "  notes rebuild                               Rebuild all git notes from commit trailers",
   "  fork <session-id> --at <snapshot>           Create a new session record from a snapshot (ID or unique prefix)",
@@ -138,6 +140,43 @@ function main(argv: string[]): void {
     const result = forkSession(repoRoot, session, at);
     console.log(`forked session ${result.session_id}`);
     console.log(`first snapshot ${result.snapshot}`);
+    return;
+  }
+  if (command === "decisions") {
+    const json = rest.includes("--json");
+    const sessionFlagIndex = rest.indexOf("--session");
+    const sessionFilter = sessionFlagIndex === -1 ? undefined : rest[sessionFlagIndex + 1];
+    if (sessionFlagIndex !== -1 && (!sessionFilter || sessionFilter.startsWith("-"))) return usage();
+    const rev = rest.find((arg, idx) => !arg.startsWith("-") && (sessionFlagIndex === -1 || idx !== sessionFlagIndex + 1));
+    if (!rev) return usage();
+    if (!decisionsEnabled(repoRoot)) {
+      console.error('sessions: decision extraction is off. Set {"decisions": {"enabled": true}} in .session-logs/config.json');
+      process.exitCode = 1;
+      return;
+    }
+    const commit = git(["-C", repoRoot, "rev-parse", "--verify", `${rev}^{commit}`]);
+    if (!commit) {
+      console.error(`sessions: unknown revision ${rev}`);
+      process.exitCode = 1;
+      return;
+    }
+    const pairs = snapshotsForCommit(repoRoot, commit).filter((pair) => !sessionFilter || pair.session === sessionFilter);
+    if (pairs.length === 0) {
+      console.error(`sessions: ${commit} has no Transcript trailer${sessionFilter ? ` for session ${sessionFilter}` : ""}`);
+      process.exitCode = 1;
+      return;
+    }
+    const extracts = pairs.map((pair) => generateDecisions(repoRoot, pair.snapshot!));
+    if (json) {
+      console.log(JSON.stringify(extracts, null, 2));
+      return;
+    }
+    for (const extract of extracts) {
+      console.log(`## Session ${extract.session_id} (snapshot ${extract.snapshot.slice(0, 12)}, ${extract.extractor})`);
+      if (extract.decisions.length === 0) console.log("no decision statements found");
+      for (const d of extract.decisions) console.log(`- [message ${d.message}, ${d.role}] ${d.text}`);
+      console.log("");
+    }
     return;
   }
   if (command === "notes") {

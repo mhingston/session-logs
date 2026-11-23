@@ -2,7 +2,7 @@
 
 Record Claude Code session transcripts and link every git commit to the session that produced it.
 
-> **Status: early, public.** Capture, commit linking (including commits made mid-turn), git notes, reading, forks, `doctor` and `prune` work on one machine. Remote sync is library code only and is not connected to any command. See [What is not done](#what-is-not-done).
+> **Status: early, public.** Transcript capture, commit linking (including commits made mid-turn), git notes, reading, forks, `doctor` and `prune` work on one machine. Deterministic decision extracts are an opt-in MVP (see [Decision extracts](#decision-extracts)). LLM-generated summaries are not built (P1). Remote sync is library code only and is not connected to any command. See [What is not done](#what-is-not-done).
 
 ## Quick start
 
@@ -64,6 +64,7 @@ If `show` finds nothing, run `doctor` first.
 - **Captures** each session's conversation at every turn end (Claude Code `Stop` hook) and stores it in `.session-logs/` at the repository root (even if Claude Code was launched from a subdirectory). The folder is gitignored, so transcripts never enter git history.
 - **Links** each commit to the session that produced it, with `Session:` and `Transcript:` trailers, through a git hook. The link survives amend, squash, cherry-pick, revert and rebase.
 - **Reads** a commit's transcript as it was when the commit was made, even after the session continued. On squashed commits that combine multiple sessions, `show` renders every linked transcript (or pass `--session <id>` to filter to one).
+- **Extracts decisions** (opt-in) with a deterministic rule set: sentences with explicit decision language, tied to the snapshot they came from. No model or network call. See [Decision extracts](#decision-extracts).
 - **Redacts** common secret formats (private keys, cloud and API keys, bearer tokens, connection strings) before anything is written. This is best effort. Do not rely on it as the only control.
 - **Keeps your git hooks working.** Your global hooks (for example Husky or Repowise) still run first.
 - **Links commits made mid-turn.** A commit made while Claude is working links to that session, however many commits it makes in that turn. A turn left open for more than 2 hours (for example after an interrupt) no longer claims commits.
@@ -84,6 +85,8 @@ node $S show <rev> --raw                 # stored JSONL, one entry per line
 node $S doctor                           # health check: hooks, store integrity, unlinked commits, missing notes
 node $S notes show <rev>                 # the git note for a commit (its session trailers)
 node $S notes rebuild                    # rebuild every note from trailers
+node $S decisions <rev>                  # deterministic decision extract for a commit's transcript (needs opt-in)
+node $S decisions <rev> --json           # same, as JSON with snapshot and content hash
 node $S fork <session> --at <snapshot>   # new session record from a snapshot (full ID or unique prefix from list)
 node $S prune --older-than 30            # dry run: which old, unlinked sessions would be removed
 node $S prune --older-than 30 --apply    # delete them
@@ -94,6 +97,34 @@ Pruning is **off** unless you pass `--older-than` or set `prune.olderThanDays` i
 Git notes: each linked commit also has a git note, `sessions notes show <rev>`, derived from its trailers. Notes are updated on commit and rewrite. They live under `.session-logs/notes.git`, not in the main repository's refs.
 
 Forks link to their parent automatically when Claude Code forks a session (`claude --resume <id> --fork-session`). The parent is found from message IDs that the fork shares with stored transcripts.
+
+## Decision extracts
+
+Three separate layers. Each is controlled on its own:
+
+| Layer | Status | Enabled by | Makes an LLM call |
+|---|---|---|---|
+| Transcript capture and commit links | Built. On after `init`. | `init` | No |
+| Deterministic decision extract | Built (MVP). **Off by default.** | `decisions.enabled` in `.session-logs/config.json` | No |
+| LLM-generated summary | Not built (P1) | Not available | Would |
+
+Git notes are commit-link metadata (the session trailers). They are not decision summaries.
+
+Enabling capture never enables extraction. To opt in, create `.session-logs/config.json` in the repository:
+
+```json
+{ "decisions": { "enabled": true } }
+```
+
+With that set, every snapshot captured by the Stop hook also gets an extract. You can also generate one on demand with `sessions decisions <rev>`, which is refused while the setting is off.
+
+What the extract does:
+
+- Scans each stored `user` and `assistant` message, sentence by sentence, and keeps sentences that contain an explicit signal: `Decision:`, `decided`, `chose`, `opted`, `settled on`, `going with`, `instead of`, or `trade-off`. This is a heuristic. It finds stated decisions, not every choice the agent made.
+- Repeated sentences are reported once, at their first occurrence.
+- Runs on the redacted snapshot only, so it cannot contain anything the transcript store does not.
+- Is written to `.session-logs/decisions/<snapshot>.json`, keyed by the snapshot ID. It records the snapshot ID, the session ID, the hash of the snapshot's content, and each decision's message index and UUID. An extract is never rewritten; a changed transcript gets its own snapshot and extract.
+- Is deterministic: the same transcript always gives the same decisions.
 
 ## Agent skill
 
@@ -117,6 +148,8 @@ mkdir -p ~/.claude/skills && ln -s /path/to/session-logs/skills/session-logs ~/.
 | Commit hooks | `.session-logs/git-hooks/` | Set as the repository's `core.hooksPath`. |
 | Claude Code hook registration (Stop, UserPromptSubmit) | `.claude/settings.local.json` | Per developer. Gitignored. |
 | Git notes (session links per commit) | `.session-logs/notes.git` | A bare repository, read through git alternates. Rebuildable from trailers. Nothing is written to the main repository's refs. |
+| Decision extracts (opt-in) | `.session-logs/decisions/<snapshot>.json` | Gitignored. Local only. Created only when `decisions.enabled` is true. |
+| Decision opt-in setting | `.session-logs/config.json` | `{ "decisions": { "enabled": true } }`. Also holds `prune.olderThanDays`. |
 | Hook errors | `.session-logs/errors.log` | Error text only; never transcript content. |
 | Decisions and findings | `docs/DECISIONS.md`, `docs/M0-findings.md` | |
 
@@ -163,6 +196,7 @@ Before connecting it, read these access notes:
 - **Remote CLI/container integration:** deferred by owner decision. No container owner decision is needed unless that work is selected.
 - **Subagent transcripts:** not captured (D23).
 - **Redaction:** best effort and pattern-based. It misses secrets that do not match a known format.
+- **Decision summaries:** the deterministic extract is built (opt-in). LLM-generated summaries are P1 and not built. The extract finds explicit decision wording only.
 - **Concurrent sessions in one repository:** a commit links the most recent session that stopped since the previous commit, and lists others as `Also-Active:`. The link is a heuristic, not proof of which session wrote the change.
 
 ## Design
@@ -199,6 +233,7 @@ src/install/           init: hook shims and settings registration
 src/notes/             git notes under .session-logs/notes.git
 src/read/              show, commits, list
 src/maintain/          fork, doctor, prune
+src/decisions/         deterministic decision extracts (opt-in)
 src/remote/            push and fetch (not connected)
 src/storage/           object store interface and Azure Blob adapter (not connected)
 scripts/live-check.sh  live Claude Code checks (run in your terminal; needs API access)

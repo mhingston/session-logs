@@ -98,7 +98,7 @@ export function segmentLines(lines: string[]): string[][] {
   return segments;
 }
 
-function writeFileAtomic(path: string, data: string | Uint8Array): void {
+export function writeFileAtomic(path: string, data: string | Uint8Array): void {
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync(tmp, data);
   renameSync(tmp, path);

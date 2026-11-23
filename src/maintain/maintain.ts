@@ -264,6 +264,7 @@ export function pruneSessions(repoRoot: string, options: PruneOptions): PrunePla
   const root = sessionLogsRoot(repoRoot);
   for (const { snapshot } of doomedSnapshots) {
     rmSync(join(root, "snapshots", `${snapshot}.json`), { force: true });
+    rmSync(join(root, "decisions", `${snapshot}.json`), { force: true });
   }
   for (const session of candidates) {
     rmSync(join(root, "sessions", `${session}.json`), { force: true });
