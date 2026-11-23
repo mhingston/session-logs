@@ -78,3 +78,34 @@ No commit carries a `Session:` or `Transcript:` trailer, so none is linked by an
 **Continue, narrowly.** The transcript added decision and verification context that the PR body and git history do not contain, and it exposed an overstated build claim. Most of the value came from reading the text, though, not from the link mechanism this tool exists for. Here the link mechanism was not exercised, because the repository had no trailers.
 
 **Smallest next increment:** enable session-logs in one repository and produce one PR with real commits. Generate the change record from trailers rather than timestamps. Ask a reviewer to rate it against the PR description on the same five criteria from the issue. Do not build PR integration or a new capture format before that result.
+
+## 7. Trailer-linked trial (follow-up)
+
+This is the "smallest next increment" from section 6, run on one private repository where session-logs was installed (`init`) before the work started.
+
+**Setup:** an Orca-launched Claude Code chat was given a bounded brief: one small change on a new local branch, two or three commits, no push, no PR, and no staging of the session-logs setup files. The branch was based on `origin/main`.
+
+**Result:**
+
+| Check | Result |
+|---|---|
+| Commits with trailers | 2 of 2. Both carry `Session:` and `Transcript:` trailers. |
+| `sessions commits <session>` | Returns both commits. The link is exact, with no timestamp heuristic. |
+| `sessions doctor` | No unlinked commits. |
+| `sessions show HEAD` | Renders the brief and the transcript from the commit's snapshot. |
+| Commits pushed | Yes, to a new remote branch. A PR was opened by mistake in the work repo and then abandoned. |
+
+**What the trailers prove:** the session recorded these two commits. They do not prove the report's claims are true.
+
+**What the transcript added that the trailers did not:**
+- The first `git checkout -b` partly failed on a sandbox error. The agent detected it, checked the working tree, and switched branches. A reviewer would want this noted. The trailers do not show it.
+- Local `main` was two commits behind `origin/main`. The agent chose `origin/main` and said so.
+
+**Verification as claimed vs evidenced:**
+- Release builds of the Application and its tests: 0 errors. Evidenced in the transcript.
+- Full Application test run: 577 passed, 1 skipped, 0 failed. Evidenced, but it ran with `DOTNET_ROLL_FORWARD=Major` on a .NET 11 runtime. The report says so.
+- Not built or tested: the WebApi and subscriber targets, and the new test against the old code. The report says so.
+
+**Assessment:** the trailer link is trustworthy here, and it is the strongest link in this experiment. The remaining gaps are in the claims, not in attribution. A reviewer still has to judge whether the report's "verified" items are sufficient.
+
+**Recommendation (updated):** continue. The next increment is a reviewer rating of this trial's record against its PR description on the five criteria in the issue. Do not build PR integration or a new capture format before that rating exists.
