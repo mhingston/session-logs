@@ -72,6 +72,14 @@ Git notes: each linked commit also has a git note, `sessions notes show <rev>`, 
 
 Forks link to their parent automatically when Claude Code forks a session (`claude --resume <id> --fork-session`). The parent is found from message IDs that the fork shares with stored transcripts.
 
+## Agent skill
+
+`skills/session-logs/SKILL.md` teaches Claude Code to answer "why was this commit made?" from a session's transcript, and to run `doctor`. Claude Code only loads skills from `~/.claude/skills` or `.claude/skills`, so link it once:
+
+```sh
+mkdir -p ~/.claude/skills && ln -s /path/to/session-logs/skills/session-logs ~/.claude/skills/session-logs
+```
+
 ## What is stored
 
 - Only `user` and `assistant` conversation entries are stored. Session metadata, cost data, and injected system context (your CLAUDE.md, managed policy text, memory) are not stored. Each snapshot's manifest counts what was left out, by type.
