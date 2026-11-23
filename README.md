@@ -146,9 +146,9 @@ It refuses to replace a `core.hooksPath` it did not set (for example Husky's), s
 - **Commits made mid-turn have no link.** Re-run `init`. It registers the `UserPromptSubmit` hook, which older installs lack.
 - **Hooks stopped working after moving the checkout.** Re-run `init`.
 
-## Remote storage (not connected)
+## Remote sync (library only)
 
-Code for syncing snapshots to Azure Blob Storage exists and is tested against an in-memory store. It is **not connected to any command**, and no container is configured.
+Remote push and fetch are implemented as library functions (`src/remote/sync.ts`) and tested against an in-memory object store. The Azure Blob adapter exists separately. Neither a CLI command nor an Azure container is wired up; CLI/container integration is deferred by owner decision, so no container owner decision is needed unless that work is selected.
 
 - `src/remote/sync.ts` pushes snapshots and fetches them into another clone, so a teammate can read a transcript for a commit they did not make. Push refuses any snapshot that contains redacted secrets, unless it is explicitly overridden (the override is logged by count only). Fetch verifies every object's hash.
 - `src/storage/remote-config.ts` is the opt-in factory. It returns nothing unless enabled. Authentication uses Entra ID (`DefaultAzureCredential`). Account keys are not used.
@@ -160,7 +160,7 @@ Before connecting it, read these access notes:
 
 ## What is not done
 
-- **Remote sync command and container:** library code only. Needs an owner decision on the container.
+- **Remote CLI/container integration:** deferred by owner decision. No container owner decision is needed unless that work is selected.
 - **Subagent transcripts:** not captured (D23).
 - **Redaction:** best effort and pattern-based. It misses secrets that do not match a known format.
 - **Concurrent sessions in one repository:** a commit links the most recent session that stopped since the previous commit, and lists others as `Also-Active:`. The link is a heuristic, not proof of which session wrote the change.

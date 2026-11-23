@@ -1,6 +1,6 @@
 # M0 findings
 
-Status: spike partly complete. Claude Code hook contract checked against the live docs (code.claude.com/docs/en/hooks.md, via a web-fetch agent; Stop section partly summarised, so re-check before M1). Git plumbing checked locally on git 2.56.1.
+Status: spike findings recorded. Claude Code hook contract checked against the live docs (code.claude.com/docs/en/hooks.md; the Stop section was partly summarised, and Stop stderr behavior was later checked live in D49). Git plumbing checked locally on git 2.56.1.
 
 ## Claude Code hooks
 
@@ -10,7 +10,7 @@ Status: spike partly complete. Claude Code hook contract checked against the liv
 | Stop fires | When the main agent finishes responding. Not on user interrupt. API errors fire `StopFailure` instead. | Verified (summary) |
 | Stop input | `stop_hook_active`, `last_assistant_message`, `background_tasks`, `session_crons` | Verified (summary) |
 | Stop exit 2 | Prevents Claude stopping and continues the conversation. | Verified |
-| Stop stderr shown to user | Not documented. | Unverified |
+| Stop stderr shown to user | Not documented. | Verified by interactive check (D49) |
 | Command hook timeout | 600 s default | Verified |
 | SessionEnd | Exists. Input includes `reason` (`clear`, `resume`, `logout`, `prompt_input_exit`, `other`). Stderr shown to user only. | Verified (table); section not read verbatim |
 | PostToolUse input | `tool_name`, `tool_input`, `tool_use_id`, `tool_response` | Reported, not re-checked |
@@ -42,7 +42,7 @@ Status: spike partly complete. Claude Code hook contract checked against the liv
 
 ## Git hooks on this machine
 
-- Global `core.hooksPath` is `~/.config/git/hooks`. Repo-local `.git/hooks/prepare-commit-msg` is **ignored** while it is set. There is no global `prepare-commit-msg`, so installation needs a decision (D32).
+- Global `core.hooksPath` is `~/.config/git/hooks`. Repo-local `.git/hooks/prepare-commit-msg` is **ignored** while it is set. There is no global `prepare-commit-msg`; this prompted D32, resolved by D34.
 - Existing global `pre-commit` (chains to Husky) and `post-commit` (Repowise) hooks would be shadowed by a repo-local `core.hooksPath`.
 
 ## Smoke test (M1 hooks, simulated Stop payload)
@@ -67,7 +67,7 @@ Run by the owner from an ordinary terminal: `claude -p "Reply OK."` in a fresh r
 
 - **Fork emits `SessionStart` with `source: "fork"`, not `"resume"`.** It carries a new `session_id`. The payload has no parent session field. Extra fields on the fork payload: `context_tokens`, `estimated_cache_write_usd`, `prompt_cache_likely_expired`, `seconds_since_last_response`. The design must not assume a parent id is passed; the parent is found through the transcript or our own records.
 - **Stop payload fields confirmed:** `session_id`, `transcript_path`, `cwd`, `hook_event_name`, `last_assistant_message`, `permission_mode`, `prompt_id`, `effort`, `background_tasks`, `session_crons`, `stop_hook_active`. Both the original run and the fork fired Stop.
-- **Stop hook stderr is not visible in `claude -p`.** The marker appeared in neither stdout nor stderr. That is not conclusive for interactive mode. The interactive check is still open.
+- **Stop hook stderr is not visible in `claude -p`.** The marker appeared in neither stdout nor stderr. That was not conclusive for interactive mode; the interactive check later resolved this by confirming stderr is not shown (D49).
 
 Interactive check (owner, 2026-11-23): the Stop hook fired in an interactive session, and its stderr marker did not appear in the UI. Stop hook stderr is not shown to the user (D49).
 
@@ -75,13 +75,13 @@ Fork linkage (D48): the live fork's transcript keeps the parent's messages with 
 
 ## Transcript contents (found while rendering a live transcript)
 
-A live transcript contains more than the conversation: session metadata, attachments, cost state, and `api-request-blob` entries. The `api-request-blob` entries carry the injected system context, which includes managed policy text, the user's CLAUDE.md and memory. Raw capture stores them (D7). Whether to keep them is an open owner decision (D38).
+A live transcript contains more than the conversation: session metadata, attachments, cost state, and `api-request-blob` entries. The `api-request-blob` entries carry the injected system context, which includes managed policy text, the user's CLAUDE.md and memory. Raw capture stored them at this stage (D7); D44 later resolved the question by retaining only `user` and `assistant` entries and counting other types without storing their content.
 
 ## Handoff test plan checks (run 2026-11-23, scratch repo, real hooks)
 
-- **Test 12 (`--no-verify`): deviates from the spec.** A `--no-verify` commit still gets `Session:` and `Transcript:` trailers. Git skips only pre-commit and commit-msg under `--no-verify`, so `prepare-commit-msg` runs. The handoff expects no link and a `doctor` report. Decision needed (D42).
+- **Test 12 (`--no-verify`): historical finding, resolved by D45.** A `--no-verify` commit still gets `Session:` and `Transcript:` trailers because `prepare-commit-msg` runs; D45 keeps the link and updates test 12 to match.
 - **Test 14 (`reset --hard`): passes.** The session index is unchanged, the linked commit stays in the reflog, and `doctor` reports no problems.
-- **Test 17 (50 MB snapshot): passes.** 45,885 messages took 178 ms through the real snapshot writer. An unchanged re-snapshot took 97 ms. Proposed threshold: 5 s (D43).
+- **Test 17 (50 MB snapshot): passes.** 45,885 messages took 178 ms through the real snapshot writer. An unchanged re-snapshot took 97 ms. The 5 s threshold was later confirmed by D46.
 
 ## Live check 2 (`scripts/live-check.sh`, owner's terminal, 2026-11-23, after D50)
 
@@ -99,4 +99,4 @@ A live transcript contains more than the conversation: session metadata, attachm
 ## Still open for M0
 
 - None of the M0 questions are open. Stop stderr is not shown to the user (D49, which means warn-only (D26) is surfaced through `doctor` and `errors.log`, not the UI). A fork emits `SessionStart` with `source: "fork"` (not `resume`).
-- Azure container owner: not needed while remote storage is not wired up (owner decision).
+- Remote push/fetch are implemented as library functions (D47), but CLI/container integration remains deferred. No container owner decision is needed unless that integration is selected.
