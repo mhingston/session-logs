@@ -2,7 +2,7 @@
 
 Record Claude Code session transcripts and link every git commit to the session that produced it.
 
-> **Status: working locally, not yet shareable.** Capture, commit linking (including commits made mid-turn), git notes, reading, forks, `doctor` and `prune` work on one machine. Remote sync is library code only and is not connected to any command. See [What is not done](#what-is-not-done).
+> **Status: early, public.** Capture, commit linking (including commits made mid-turn), git notes, reading, forks, `doctor` and `prune` work on one machine. Remote sync is library code only and is not connected to any command. See [What is not done](#what-is-not-done).
 
 ## Quick start
 
