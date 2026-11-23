@@ -69,7 +69,9 @@ Run by the owner from an ordinary terminal: `claude -p "Reply OK."` in a fresh r
 - **Stop payload fields confirmed:** `session_id`, `transcript_path`, `cwd`, `hook_event_name`, `last_assistant_message`, `permission_mode`, `prompt_id`, `effort`, `background_tasks`, `session_crons`, `stop_hook_active`. Both the original run and the fork fired Stop.
 - **Stop hook stderr is not visible in `claude -p`.** The marker appeared in neither stdout nor stderr. That is not conclusive for interactive mode. The interactive check is still open.
 
-Still open: whether Stop hook stderr shows in an interactive session.
+Interactive check (owner, 2026-11-23): the Stop hook fired in an interactive session, and its stderr marker did not appear in the UI. Stop hook stderr is not shown to the user (D49).
+
+Fork linkage (D48): the live fork's transcript keeps the parent's messages with their uuids. 20 of its 26 `parentUuid` references point into the parent. The writer uses that overlap to set the parent link, and it resolves to the correct parent on the live data.
 
 ## Transcript contents (found while rendering a live transcript)
 
@@ -87,6 +89,5 @@ A live transcript contains more than the conversation: session metadata, attachm
 
 ## Still open for M0
 
-- Stop stderr visibility to the user (affects how the warn-only policy, D26, is surfaced).
-- Whether a fork emits a `SessionStart` with `resume`.
-- Azure Blob: container owner not yet named (owner decision).
+- None of the M0 questions are open. Stop stderr is not shown to the user (D49, which means warn-only (D26) is surfaced through `doctor` and `errors.log`, not the UI). A fork emits `SessionStart` with `source: "fork"` (not `resume`).
+- Azure container owner: not needed while remote storage is not wired up (owner decision).

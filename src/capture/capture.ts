@@ -150,6 +150,67 @@ export function candidateSessions(repoRoot: string, since?: string): ActiveSessi
 // Takes a snapshot of the transcript. Returns the existing snapshot when the
 // redacted content has not changed since the last one, so no new work is
 // written (skip-if-unchanged compares content, not the manifest).
+// Finds the session this one was forked from (D48). A forked transcript copies the
+// parent's messages, so its uuids overlap with the parent's stored snapshots and with
+// no other session's. Picks the other session sharing the most uuids (ties: most
+// recent), and within it the snapshot holding the most of them. Returns null when no
+// stored session shares any message.
+export function findForkParent(
+  repoRoot: string,
+  sessionId: string,
+  storedLines: string[],
+): { session_id: string; snapshot: string } | null {
+  const mine = new Set<string>();
+  for (const line of storedLines) {
+    try {
+      const uuid = (JSON.parse(line) as { uuid?: unknown }).uuid;
+      if (typeof uuid === "string") mine.add(uuid);
+    } catch {
+      // Stored lines are JSON; anything else is ignored.
+    }
+  }
+  if (mine.size === 0) {
+    return null;
+  }
+  const root = sessionLogsRoot(repoRoot);
+  const dir = join(root, "snapshots");
+  if (!existsSync(dir)) {
+    return null;
+  }
+  // Per other snapshot: how many of this transcript's uuids it holds.
+  const matches: Array<{ session_id: string; snapshot: string; created_at: string; count: number }> = [];
+  for (const name of readdirSync(dir)) {
+    const manifest = readJson<Manifest>(join(dir, name));
+    if (!manifest || manifest.session_id === sessionId) continue;
+    const shared = new Set<string>();
+    for (const segment of manifest.segments) {
+      for (const line of readFileSync(join(root, "objects", segment.sha256), "utf8").split("\n")) {
+        try {
+          const uuid = (JSON.parse(line) as { uuid?: unknown }).uuid;
+          if (typeof uuid === "string" && mine.has(uuid)) shared.add(uuid);
+        } catch {
+          // Skip non-JSON lines.
+        }
+      }
+    }
+    if (shared.size > 0) {
+      matches.push({ session_id: manifest.session_id, snapshot: name.replace(/\.json$/, ""), created_at: manifest.created_at, count: shared.size });
+    }
+  }
+  if (matches.length === 0) {
+    return null;
+  }
+  // Parent session: most shared uuids, then most recent snapshot.
+  const bySession = new Map<string, number>();
+  for (const m of matches) bySession.set(m.session_id, (bySession.get(m.session_id) ?? 0) + m.count);
+  const parentSession = [...bySession.entries()].sort((a, b) => b[1] - a[1])[0]![0];
+  // Snapshot of that session holding the most shared uuids, then most recent.
+  const best = matches
+    .filter((m) => m.session_id === parentSession)
+    .sort((a, b) => b.count - a.count || (a.created_at < b.created_at ? 1 : -1))[0]!;
+  return { session_id: best.session_id, snapshot: best.snapshot };
+}
+
 export function snapshotTranscript(
   repoRoot: string,
   sessionId: string,
@@ -182,6 +243,14 @@ export function snapshotTranscript(
     return existing.snapshot;
   }
 
+  // A session's parent is fixed at its first snapshot (D48). Later snapshots keep it.
+  let parent: Manifest["parent"] = null;
+  if (existing) {
+    parent = readJson<Manifest>(join(root, "snapshots", `${existing.snapshot}.json`))?.parent ?? null;
+  } else {
+    parent = findForkParent(repoRoot, sessionId, lines);
+  }
+
   const segments: SegmentRef[] = [];
   mkdirSync(join(root, "objects"), { recursive: true });
   for (const group of segmentLines(lines)) {
@@ -197,7 +266,7 @@ export function snapshotTranscript(
   const manifest: Manifest = {
     schema_version: SCHEMA_VERSION,
     session_id: sessionId,
-    parent: null,
+    parent,
     segments,
     source: { agent: "claude-code", transcript_path: transcriptPath },
     includes_subagents: false,
