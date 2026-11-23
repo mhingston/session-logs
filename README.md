@@ -1,122 +1,159 @@
 # session-logs
 
-Record Claude Code session transcripts and link them to the git commits they produced.
+Record Claude Code session transcripts and link every git commit to the session that produced it.
 
-> **Status: early development.** Local capture works: a Claude Code `Stop` hook snapshots the transcript, and a git hook adds `Session:` and `Transcript:` trailers. Secrets are redacted before anything is written. Read commands exist (`sessions show`, `commits`, `list`). Commit trailers are handled for amend, squash, cherry-pick, rebase and revert. `fork`, `doctor` and `prune` exist. Remote push and fetch exist as library code, not yet wired to any command. The notes index is not built. The live Claude Code run has not been verified.
+> **Status: working locally, not yet shareable.** Capture, commit linking, reading, forks, `doctor` and `prune` work on one machine. Remote sync is library code only and is not connected to any command. See [What is not done](#what-is-not-done).
 
-## What it will do
+## Quick start
 
-- Store each Claude Code session's transcript in `.session-logs/` inside the repository.
-- Link every commit made during a session to that session and to the transcript snapshot it used.
-- Let you read a commit's transcript as it was at commit time.
-- Optionally sync transcripts to Azure Blob Storage, for teammates and auditors.
-
-Design decisions are recorded in [`docs/DECISIONS.md`](docs/DECISIONS.md). Findings from the first spike are in [`docs/M0-findings.md`](docs/M0-findings.md).
-
-## Where transcripts live
-
-| Location | Default | Notes |
-|---|---|---|
-| `.session-logs/` in each repository | On (once capture exists) | Gitignored. Transcripts never enter git history. |
-| Azure Blob Storage | **Off** | Opt-in per repository. Sync is not wired into any command yet. |
-
-Transcripts can contain secrets and personal data. Read the privacy notes before you enable anything.
-
-## Installing into a repository
-
-From inside the target repository:
+You need Node.js 23.6 or later (`node -v`), git, and Claude Code.
 
 ```sh
+# 1. Install and check this tool (once)
+cd /path/to/session-logs
+npm install
+npm run check          # type-check and tests; should report 67 passing
+
+# 2. Turn it on in a repository (once per repository, per clone)
+cd /path/to/your-repo
 node /path/to/session-logs/src/cli/init.ts
+
+# 3. Work as normal: use Claude Code, then commit
+claude                 # ...work in a session...
+git commit -am "Your change"
+
+# 4. Read it back
+node /path/to/session-logs/src/cli/sessions.ts list
+node /path/to/session-logs/src/cli/sessions.ts show HEAD
 ```
 
-This points `core.hooksPath` at managed hooks under `.session-logs/git-hooks`, which chain your global hooks first. It registers the Stop hook in `.claude/settings.local.json` and adds `.session-logs/` and that file to `.gitignore`. It refuses to replace a `core.hooksPath` it did not set, such as Husky's. Re-running it is safe.
+After step 2, a commit made in a session ends with two trailers:
 
-If you move this checkout, re-run `init` in each repository: the hooks and settings record its absolute path.
+```
+Session: 2c087fae-f67a-4647-8eb6-e790c1e31844
+Transcript: a53e7356f3e25c3e299a87cf142a603eff5d3c99c3fa3b619ed0aadf1fcb3713
+```
 
-## Reading sessions
+`Transcript:` is the snapshot ID. It identifies the transcript as it was at commit time.
+
+If `show` finds nothing, run `doctor` (below) first.
+
+## What it does
+
+- **Captures** each session's conversation at every turn end (Claude Code `Stop` hook) and stores it in `.session-logs/` inside the repository. The folder is gitignored, so transcripts never enter git history.
+- **Links** each commit to the session that produced it, with `Session:` and `Transcript:` trailers, through a git hook. The link survives amend, squash, cherry-pick, revert and rebase.
+- **Reads** a commit's transcript as it was when the commit was made, even after the session continued.
+- **Redacts** common secret formats (private keys, cloud and API keys, bearer tokens, connection strings) before anything is written. This is best effort. Do not rely on it as the only control.
+- **Keeps your git hooks working.** Your global hooks (for example Husky or Repowise) still run first.
+
+## Commands
+
+Run these from inside the repository. Replace the path with wherever you cloned this tool.
 
 ```sh
-node /path/to/session-logs/src/cli/sessions.ts list               # sessions in this repo
-node /path/to/session-logs/src/cli/sessions.ts commits <session>  # commits linked to a session
-node /path/to/session-logs/src/cli/sessions.ts show <rev>         # transcript as at that commit
-node /path/to/session-logs/src/cli/sessions.ts show <rev> --raw   # redacted JSONL
+S=/path/to/session-logs/src/cli/sessions.ts
+
+node $S list                             # sessions recorded in this repository
+node $S commits <session-id>             # commits linked to a session
+node $S show <rev>                       # transcript as it was at that commit (conversation turns only)
+node $S show <rev> --raw                 # stored JSONL, one entry per line
+node $S doctor                           # health check: hooks, store integrity, unlinked commits
+node $S fork <session> --at <snapshot>   # new session record starting from an earlier snapshot
+node $S prune --older-than 30            # dry run: which old, unlinked sessions would be removed
+node $S prune --older-than 30 --apply    # delete them
 ```
 
-`show` renders only conversation turns. The raw output includes every stored entry.
+Pruning is **off** unless you pass `--older-than` or set `prune.olderThanDays` in `.session-logs/config.json`. It removes whole sessions only, and never linked ones unless you pass `--include-linked`. Pruning a linked session makes `show` fail for those commits.
 
-Maintenance:
-
-```sh
-node /path/to/session-logs/src/cli/sessions.ts fork <session> --at <snapshot>
-node /path/to/session-logs/src/cli/sessions.ts doctor
-node /path/to/session-logs/src/cli/sessions.ts prune --older-than 30            # dry run
-node /path/to/session-logs/src/cli/sessions.ts prune --older-than 30 --apply    # delete
-```
-
-`prune` is off unless you pass `--older-than` or set `prune.olderThanDays` in `.session-logs/config.json`. It keeps sessions that commits link to, unless you pass `--include-linked`. Pruning a linked session makes `show` fail for those commits.
-
-## Remote storage (Azure Blob)
-
-Remote storage is disabled unless a repository explicitly enables it:
-
-```ts
-import { createRemoteStore } from "./src/storage/remote-config.ts";
-
-const store = createRemoteStore({
-  enabled: true,
-  provider: "azure-blob",
-  accountUrl: "https://<account>.blob.core.windows.net", // https only
-  container: "session-logs",
-  prefix: "objects/",            // optional
-});
-// `store` is undefined when enabled is false.
-```
-
-- **Authentication** uses Entra ID through `DefaultAzureCredential` (for example, `az login` or a managed identity). Account keys are not used.
-- **Access** needs data-plane permission on the container, such as Storage Blob Data Contributor.
-- **Who can read:** anyone with read access to the container can read every transcript in it. Access tiers are not part of the MVP.
-- **Deletion:** not implemented. Removing a blob does not remove copies held by clones or teammates.
-- **Redaction:** not implemented yet. Do not enable remote storage until the redaction pass exists (see decision D24).
-
-Objects are content-addressed by SHA-256. Writes are idempotent, and both reads and writes verify the bytes against their hash.
+Forks link to their parent automatically when Claude Code forks a session (`claude --resume <id> --fork-session`). The parent is found from message IDs that the fork shares with stored transcripts.
 
 ## What is stored
 
-Only `user` and `assistant` conversation entries are stored (D44). Session metadata, cost state, and injected system context (CLAUDE.md, managed policy, memory) are not stored. The manifest counts what was excluded, by type.
+- Only `user` and `assistant` conversation entries are stored. Session metadata, cost data, and injected system context (your CLAUDE.md, managed policy text, memory) are not stored. Each snapshot's manifest counts what was left out, by type.
+- Transcripts are split into segments of up to 500 messages or 1 MB. Closed segments never change, so later snapshots reuse them.
+- A snapshot's ID is the SHA-256 of its manifest. A segment is stored under the SHA-256 of its bytes.
+
+## Where things live
+
+| What | Where | Notes |
+|---|---|---|
+| Transcripts, snapshots, session records | `.session-logs/` in the repository | Gitignored. Local only. |
+| Commit hooks | `.session-logs/git-hooks/` | Set as the repository's `core.hooksPath`. |
+| Stop hook registration | `.claude/settings.local.json` | Per developer. Gitignored. |
+| Hook errors | `.session-logs/errors.log` | Error text only; never transcript content. |
+| Decisions and findings | `docs/DECISIONS.md`, `docs/M0-findings.md` | |
+
+## Installation details
+
+`init` does three things in the repository:
+
+1. Points `core.hooksPath` at `.session-logs/git-hooks`. Each shim runs your global hook of the same name first, then session-logs. For `prepare-commit-msg`, it also runs the repository's own `.git/hooks` script.
+2. Registers the Stop hook in `.claude/settings.local.json`.
+3. Adds `.session-logs/` and `.claude/settings.local.json` to `.gitignore`.
+
+It refuses to replace a `core.hooksPath` it did not set (for example Husky's), so it cannot silently disable other tools. It is safe to re-run.
+
+**If you move this checkout, re-run `init` in each repository.** The hooks and settings contain its absolute path.
+
+## Troubleshooting
+
+- **`show` says "has no Transcript trailer".** The commit was made outside a session, or the hook did not run. Run `doctor`.
+- **`doctor` warns "commit hooks are not installed".** Run `init` in this repository.
+- **`doctor` reports an unlinked commit during a session.** This is a heuristic: it thinks a session was active when the commit was made. Check it. Commits made with `--no-verify` are still linked, by design (D45).
+- **A commit has no trailers.** Read `.session-logs/errors.log`. The commit still succeeds when a hook fails, by design.
+- **`prune` says it is off.** Pass `--older-than <days>`.
+- **Hooks stopped working after moving the checkout.** Re-run `init`.
+
+## Remote storage (not connected)
+
+Code for syncing snapshots to Azure Blob Storage exists and is tested against an in-memory store. It is **not connected to any command**, and no container is configured.
+
+- `src/remote/sync.ts` pushes snapshots and fetches them into another clone, so a teammate can read a transcript for a commit they did not make. Push refuses any snapshot that contains redacted secrets, unless it is explicitly overridden (the override is logged by count only). Fetch verifies every object's hash.
+- `src/storage/remote-config.ts` is the opt-in factory. It returns nothing unless enabled. Authentication uses Entra ID (`DefaultAzureCredential`). Account keys are not used.
+
+Before connecting it, read these access notes:
+
+- **Who can read:** anyone with read access to the container can read every transcript in it. Access tiers are not part of the MVP.
+- **Deletion:** removing blobs does not remove copies held by clones or teammates.
+
+## What is not done
+
+- **Remote sync command and container:** library code only. Needs an owner decision on the container.
+- **Notes index** (`refs/notes/sessions`, optional in the design): not built.
+- **Subagent transcripts:** not captured (D23).
+- **Redaction:** best effort and pattern-based. It misses secrets that do not match a known format.
+- **Concurrent sessions in one repository:** a commit links the most recent session that stopped since the previous commit, and lists others as `Also-Active:`. The link is a heuristic, not proof of which session wrote the change.
+
+## Design
+
+The decision log is [`docs/DECISIONS.md`](docs/DECISIONS.md). The spike findings, including the live Claude Code checks, are in [`docs/M0-findings.md`](docs/M0-findings.md).
 
 ## Development
 
-Requires Node.js 23.6 or later. Node runs the TypeScript sources directly.
-
 ```sh
 npm install
-npm test          # unit tests; no network access needed
-npm run typecheck # requires TypeScript (see below)
+npm test          # unit and integration tests; no network access
+npm run typecheck # TypeScript, strict
 npm run check     # both
 ```
 
-`npm run typecheck` needs the TypeScript compiler and Node type definitions, which are not yet in `package.json`. Add them with:
-
-```sh
-npm install --save-dev --save-exact typescript@5.9.3 @types/node@26.6.6
-```
-
-## Layout
+Layout:
 
 ```
-src/storage/object-store.ts      provider-agnostic interface and hashing
-src/storage/azure-blob-store.ts  content-addressed store over a narrow container interface
-src/storage/azure-sdk.ts         Azure SDK adapter (the only file that imports the SDK)
-src/storage/remote-config.ts     opt-in factory; remote is off by default
-src/capture/capture.ts           segmenting, manifest and snapshot writer (local .session-logs/)
-src/hooks/stop.ts                Claude Code Stop hook; always exits 0
-src/hooks/prepare-commit-msg.ts  git hook that adds trailers; always exits 0
-test/                            node:test suites
-docs/                            decision log and spike findings
+src/cli/               sessions (read and maintenance) and init entry points
+src/capture/           capture core, redaction, commit-trailer rules
+src/hooks/             Claude Code Stop hook and git prepare-commit-msg hook
+src/install/           init: hook shims and settings registration
+src/read/              show, commits, list
+src/maintain/          fork, doctor, prune
+src/remote/            push and fetch (not connected)
+src/storage/           object store interface and Azure Blob adapter (not connected)
+scripts/live-check.sh  live Claude Code checks (run in your terminal; needs API access)
+test/                  node:test suites
+docs/                  decisions and findings
 ```
 
-Claude Code is the only agent this design targets. Agent-specific code will sit behind an adapter so other agents can be added later.
+Claude Code is the only supported agent. Agent-specific code lives in `src/hooks/` and `src/install/`, so another agent would need its own hook adapter.
 
 ## Licence
 
