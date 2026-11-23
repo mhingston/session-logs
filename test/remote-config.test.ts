@@ -3,6 +3,13 @@ import assert from "node:assert/strict";
 import { createRemoteStore } from "../src/storage/remote-config.ts";
 import type { BlobContainerLike } from "../src/storage/azure-blob-store.ts";
 
+const azure = {
+  enabled: true as const,
+  provider: "azure-blob" as const,
+  accountUrl: "https://acct.blob.core.windows.net",
+  container: "session-logs",
+};
+
 test("remote storage is off by default: no store and no container access", () => {
   let accessed = false;
   const store = createRemoteStore(
@@ -18,18 +25,21 @@ test("remote storage is off by default: no store and no container access", () =>
   assert.equal(accessed, false);
 });
 
-test("enabled azure-blob config builds a store from the supplied container", () => {
+test("enabled azure-blob config uses the supplied container in tests", () => {
   const container: BlobContainerLike = { blob: () => { throw new Error("unused"); } };
-  const store = createRemoteStore(
-    { enabled: true, provider: "azure-blob", prefix: "objects/" },
-    { azureContainer: () => container },
-  );
+  const store = createRemoteStore(azure, { azureContainer: () => container });
   assert.ok(store);
 });
 
-test("enabled azure-blob config without a container fails loudly", () => {
+test("enabled azure-blob config without a test seam opens a real container handle without network", () => {
+  // Constructing the handle makes no request; it only needs a valid https URL.
+  const store = createRemoteStore(azure);
+  assert.ok(store);
+});
+
+test("azure-blob config rejects a non-https account URL", () => {
   assert.throws(
-    () => createRemoteStore({ enabled: true, provider: "azure-blob" }, {}),
-    /no container client supplied/,
+    () => createRemoteStore({ ...azure, accountUrl: "http://acct.blob.core.windows.net" }),
+    /must use https/,
   );
 });
