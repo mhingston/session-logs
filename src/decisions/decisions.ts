@@ -15,6 +15,7 @@ import { sha256Hex } from "../storage/object-store.ts";
 
 export const EXTRACTOR_VERSION = "deterministic-v1";
 export const EXTRACT_SCHEMA_VERSION = 1;
+const SNAPSHOT_ID = /^[0-9a-f]{64}$/;
 
 // A sentence is a candidate decision when it matches one of these signals.
 // Heuristic by design: it finds explicit decision language, not every choice.
@@ -99,6 +100,10 @@ export function extractDecisionsFromLines(lines: string[]): ExtractedDecision[] 
 }
 
 function extractPath(repoRoot: string, snapshot: string): string {
+  // Snapshot IDs come from commit trailers too, so validate before touching the filesystem.
+  if (!SNAPSHOT_ID.test(snapshot)) {
+    throw new Error(`not a snapshot id: ${snapshot}`);
+  }
   return join(sessionLogsRoot(repoRoot), "decisions", `${snapshot}.json`);
 }
 

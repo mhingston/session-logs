@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { installHooks } from "../src/install/install.ts";
 import { sessionLogsRoot, snapshotTranscript } from "../src/capture/capture.ts";
+import { pruneSessions } from "../src/maintain/maintain.ts";
 import {
   decisionsEnabled,
   extractDecisionsFromLines,
@@ -159,4 +160,30 @@ test("sessions decisions prints the extract for a commit and refuses when disabl
   const enabled = spawnSync(process.execPath, [CLI, "decisions", "HEAD"], { cwd: repo, encoding: "utf8" });
   assert.equal(enabled.status, 0, enabled.stderr);
   assert.match(enabled.stdout, /- \[message 1, assistant\] Decision: keep the cache in memory for now\./);
+});
+
+test("a non-hash snapshot id is rejected before any extract file is read", () => {
+  const repo = setupRepo();
+  mkdirSync(sessionLogsRoot(repo), { recursive: true });
+  writeFileSync(join(sessionLogsRoot(repo), "private.json"), JSON.stringify({ decisions: [] }));
+  assert.throws(() => readDecisions(repo, "../private"), /not a snapshot id/);
+  assert.throws(() => generateDecisions(repo, "../../private"), /not a snapshot id/);
+});
+
+test("prune --apply removes a pruned session's extracts; a dry run keeps them", () => {
+  const repo = setupRepo();
+  writeConfig(repo, { decisions: { enabled: true } });
+  const transcript = join(repo, "t.jsonl");
+  writeFileSync(transcript, SAMPLE.join("\n") + "\n");
+  const snapshot = generateDecisions(repo, snapshotTranscript(repo, "s1", transcript)).snapshot;
+  const later = { olderThanDays: 1, now: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000) };
+  const extractFile = join(sessionLogsRoot(repo), "decisions", `${snapshot}.json`);
+
+  const dry = pruneSessions(repo, { ...later, apply: false, includeLinked: false });
+  assert.deepEqual(dry.sessions, ["s1"]);
+  assert.equal(existsSync(extractFile), true);
+
+  pruneSessions(repo, { ...later, apply: true, includeLinked: false });
+  assert.equal(existsSync(extractFile), false);
+  assert.equal(existsSync(join(sessionLogsRoot(repo), "snapshots", `${snapshot}.json`)), false);
 });
