@@ -2,7 +2,7 @@
 
 Record Claude Code session transcripts and link them to the git commits they produced.
 
-> **Status: early development.** Local capture works: a Claude Code `Stop` hook snapshots the transcript, and a git hook adds `Session:` and `Transcript:` trailers. Secrets are redacted before anything is written. Read commands (`show`, `commits`, `list`) and git-operation handling (rebase, cherry-pick, forks) are not built yet. The live Claude Code run has not been verified.
+> **Status: early development.** Local capture works: a Claude Code `Stop` hook snapshots the transcript, and a git hook adds `Session:` and `Transcript:` trailers. Secrets are redacted before anything is written. Read commands exist (`sessions show`, `commits`, `list`). Commit trailers are handled for amend, squash, cherry-pick, rebase and revert. Forks, `doctor`, `prune` and the notes index are not built yet. The live Claude Code run has not been verified.
 
 ## What it will do
 
@@ -31,6 +31,19 @@ node /path/to/session-logs/src/cli/init.ts
 ```
 
 This points `core.hooksPath` at managed hooks under `.session-logs/git-hooks`, which chain your global hooks first. It registers the Stop hook in `.claude/settings.local.json` and adds `.session-logs/` and that file to `.gitignore`. It refuses to replace a `core.hooksPath` it did not set, such as Husky's. Re-running it is safe.
+
+If you move this checkout, re-run `init` in each repository: the hooks and settings record its absolute path.
+
+## Reading sessions
+
+```sh
+node /path/to/session-logs/src/cli/sessions.ts list               # sessions in this repo
+node /path/to/session-logs/src/cli/sessions.ts commits <session>  # commits linked to a session
+node /path/to/session-logs/src/cli/sessions.ts show <rev>         # transcript as at that commit
+node /path/to/session-logs/src/cli/sessions.ts show <rev> --raw   # redacted JSONL
+```
+
+`show` renders only conversation turns. The raw output includes every stored entry.
 
 ## Remote storage (Azure Blob)
 

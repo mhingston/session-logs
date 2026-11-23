@@ -65,6 +65,10 @@ Run by the owner from an ordinary terminal: `claude -p "Reply OK."` in a fresh r
 
 Still not verified: whether the Stop hook's stderr reaches the user, and whether a fork emits `SessionStart` with `resume`.
 
+## Transcript contents (found while rendering a live transcript)
+
+A live transcript contains more than the conversation: session metadata, attachments, cost state, and `api-request-blob` entries. The `api-request-blob` entries carry the injected system context, which includes managed policy text, the user's CLAUDE.md and memory. Raw capture stores them (D7). Whether to keep them is an open owner decision (D38).
+
 ## Measured
 
 - Segmenting, hashing and manifest build for a 50 MB synthetic transcript (45,155 messages, 91 segments): about 49 ms of CPU. Excludes git object writes and Blob uploads, so it is a lower bound. Re-measure with real git writes in M1.

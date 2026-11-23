@@ -1,7 +1,5 @@
 # session-logs decision log (draft, pending repo creation)
-
 Supersedes the handoff's D1, D3, D6, D9 (partly), D11 where noted.
-
 | Date | ID | Decision | Reason |
 |---|---|---|---|
 | 2026-11-23 | D17 | Local store root is `.session-logs/` inside each repository, gitignored by default. It replaces the `refs/sessions/*` store as the source of truth. | Owner decision. Transcripts stay out of git history. Supersedes D1. |
@@ -23,5 +21,9 @@ Supersedes the handoff's D1, D3, D6, D9 (partly), D11 where noted.
 | 2026-11-23 | D33 | MIT licence. | Owner decision. |
 | 2026-11-23 | D34 | Resolves D32. `session-logs init` sets a repo-local `core.hooksPath` to managed shims that first run the matching global hook, then session-logs. `prepare-commit-msg` also chains the repo's own hook (the global set has no counterpart). It refuses to replace a repo-local `core.hooksPath` it did not set. Stop is registered in `.claude/settings.local.json`, and `.session-logs/` and that file are gitignored. | Implements the recommendation in the last session. Verified with the real global config: Husky and Repowise chain without errors. |
 | 2026-11-23 | D35 | Redaction runs on each line before segmenting, so only redacted text is stored. Manifest records counts per kind. Best effort (D24). | M1 requirement (handoff §7). |
+| 2026-11-23 | D36 | Concurrent sessions: each session has its own `active/<id>.json`. A commit links the most recent session that stopped since the previous commit (`Session:`/`Transcript:`) and lists any others as `Also-Active:`. The first commit uses only the latest session. Replaces the single `current.json` pointer. | Fixes the concurrent-session gap found in review. Last-Stop-wins was wrong when two sessions share a repo. |
+| 2026-11-23 | D37 | `content_sha256` is the hash of the redacted transcript text, not the raw file. Skip-if-unchanged compares that hash. | Avoids storing a digest derived from unredacted secrets. |
+| 2026-11-23 | D38 | Markdown renders only `user` and `assistant` entries. Raw JSONL keeps everything, including `api-request-blob` entries, which carry injected system context (managed policy text, CLAUDE.md, memory). Whether those entries should be stored at all is an open owner decision. | Found when rendering a live transcript; the raw store is lossless by D7. |
+| 2026-11-23 | D39 | Trailer rules by git operation, checked against real git in scratch repos. `prepare-commit-msg` receives source `message` for both `commit -m` and `commit --amend -m`, so source cannot identify amend. Session/Transcript are ordered pairs; the same session's pair has its snapshot updated (amend), a new session's pair is appended (squash keeps every pair), and nothing is deleted otherwise. Cherry-pick (CHERRY_PICK_HEAD) and rebase (rebase-merge/rebase-apply) keep existing trailers and add no new session. Revert takes `Reverts:` from the generated `This reverts commit <sha>.` line, because git removes REVERT_HEAD before the hook runs. | M3 requirements from handoff §6. Corrects the earlier `replace` rule, which would have deleted links during a squash. |
 
 Open: object-store container owner, and whether the `Transcript:` hash format is final (D20).

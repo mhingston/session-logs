@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { sha256Hex } from "../storage/object-store.ts";
 import { mergeCounts, redact } from "./redact.ts";
@@ -6,10 +6,10 @@ import { mergeCounts, redact } from "./redact.ts";
 // M1 capture core. Local store only: .session-logs/ inside the repository.
 //
 // Layout under <repo>/.session-logs/:
-//   objects/<sha256>            immutable segment bytes (content-addressed)
+//   objects/<sha256>            immutable segment bytes (content-addressed, redacted)
 //   snapshots/<snapshot>.json   manifest; snapshot id = sha256 of manifest bytes (D20)
-//   sessions/<session_id>.json  latest snapshot and transcript hash for the session
-//   current.json                session the next commit should be linked to
+//   sessions/<session_id>.json  latest snapshot and redacted-content hash for the session
+//   active/<session_id>.json    one file per session that has stopped in this repo
 //
 // Segmentation is fixed from the start of the file, so closed segments never
 // change as a transcript grows (D8).
@@ -38,13 +38,15 @@ export interface Manifest {
 
 export interface SessionIndex {
   session_id: string;
-  transcript_sha256: string;
+  // Hash of the redacted transcript text, so no secret-derived digest is stored.
+  content_sha256: string;
   snapshot: string;
 }
 
-export interface CurrentSession {
+export interface ActiveSession {
   session_id: string;
   transcript_path: string;
+  last_stop_at: string;
 }
 
 export function sessionLogsRoot(repoRoot: string): string {
@@ -85,18 +87,45 @@ function readJson<T>(path: string): T | undefined {
   return JSON.parse(readFileSync(path, "utf8")) as T;
 }
 
-export function readCurrentSession(repoRoot: string): CurrentSession | undefined {
-  return readJson<CurrentSession>(join(sessionLogsRoot(repoRoot), "current.json"));
+// Records that a session has stopped in this repository. Each session has its
+// own file, so concurrent sessions do not overwrite each other.
+export function recordActiveSession(
+  repoRoot: string,
+  session: { session_id: string; transcript_path: string },
+  now: Date = new Date(),
+): void {
+  const dir = join(sessionLogsRoot(repoRoot), "active");
+  mkdirSync(dir, { recursive: true });
+  const record: ActiveSession = { ...session, last_stop_at: now.toISOString() };
+  writeFileAtomic(join(dir, `${session.session_id}.json`), JSON.stringify(record, null, 2) + "\n");
 }
 
-export function writeCurrentSession(repoRoot: string, current: CurrentSession): void {
-  const root = sessionLogsRoot(repoRoot);
-  mkdirSync(root, { recursive: true });
-  writeFileAtomic(join(root, "current.json"), JSON.stringify(current, null, 2) + "\n");
+export function allActiveSessions(repoRoot: string): ActiveSession[] {
+  const dir = join(sessionLogsRoot(repoRoot), "active");
+  if (!existsSync(dir)) {
+    return [];
+  }
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => readJson<ActiveSession>(join(dir, name)))
+    .filter((record): record is ActiveSession => record !== undefined)
+    .sort((a, b) => Date.parse(b.last_stop_at) - Date.parse(a.last_stop_at));
+}
+
+// Sessions that stopped after `since` (exclusive), most recent first.
+// With no `since` (no earlier commit), only the single most recent session.
+export function candidateSessions(repoRoot: string, since?: string): ActiveSession[] {
+  const all = allActiveSessions(repoRoot);
+  if (since === undefined) {
+    return all.slice(0, 1);
+  }
+  // Compare parsed times: git gives offset timestamps, we store UTC with milliseconds.
+  const sinceMs = Date.parse(since);
+  return all.filter((record) => Date.parse(record.last_stop_at) > sinceMs);
 }
 
 // Takes a snapshot of the transcript. Returns the existing snapshot when the
-// transcript content has not changed since the last one, so no new work is
+// redacted content has not changed since the last one, so no new work is
 // written (skip-if-unchanged compares content, not the manifest).
 export function snapshotTranscript(
   repoRoot: string,
@@ -105,19 +134,10 @@ export function snapshotTranscript(
   now: Date = new Date(),
 ): string {
   const root = sessionLogsRoot(repoRoot);
-  const raw = readFileSync(transcriptPath);
-  const transcriptHash = sha256Hex(raw);
-
-  const sessionFile = join(root, "sessions", `${sessionId}.json`);
-  const existing = readJson<SessionIndex>(sessionFile);
-  if (existing && existing.transcript_sha256 === transcriptHash) {
-    return existing.snapshot;
-  }
-
-  // Redact before anything is written (D24). Only redacted text is stored.
+  // Redact before anything is hashed or written (D24). Only redacted text is
+  // stored, and only its hash is kept in the index.
   const redactions: Record<string, number> = {};
-  const lines = raw
-    .toString("utf8")
+  const lines = readFileSync(transcriptPath, "utf8")
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => {
@@ -125,6 +145,14 @@ export function snapshotTranscript(
       mergeCounts(redactions, result.counts);
       return result.text;
     });
+  const contentHash = sha256Hex(Buffer.from(lines.join("\n") + "\n", "utf8"));
+
+  const sessionFile = join(root, "sessions", `${sessionId}.json`);
+  const existing = readJson<SessionIndex>(sessionFile);
+  if (existing && existing.content_sha256 === contentHash) {
+    return existing.snapshot;
+  }
+
   const segments: SegmentRef[] = [];
   mkdirSync(join(root, "objects"), { recursive: true });
   for (const group of segmentLines(lines)) {
@@ -153,7 +181,7 @@ export function snapshotTranscript(
   mkdirSync(join(root, "snapshots"), { recursive: true });
   mkdirSync(join(root, "sessions"), { recursive: true });
   writeFileAtomic(join(root, "snapshots", `${snapshot}.json`), manifestBytes);
-  const index: SessionIndex = { session_id: sessionId, transcript_sha256: transcriptHash, snapshot };
+  const index: SessionIndex = { session_id: sessionId, content_sha256: contentHash, snapshot };
   writeFileAtomic(sessionFile, JSON.stringify(index, null, 2) + "\n");
   return snapshot;
 }

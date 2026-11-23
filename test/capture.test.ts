@@ -9,7 +9,7 @@ import {
   segmentLines,
   snapshotTranscript,
   sessionLogsRoot,
-  writeCurrentSession,
+  recordActiveSession,
   SEGMENT_MAX_MESSAGES,
 } from "../src/capture/capture.ts";
 
@@ -94,7 +94,7 @@ test("stop hook records the session and exits 0 on valid input", () => {
     encoding: "utf8",
   });
   assert.equal(result.status, 0);
-  assert.ok(existsSync(join(sessionLogsRoot(repo), "current.json")));
+  assert.ok(existsSync(join(sessionLogsRoot(repo), "active", "s9.json")));
   assert.ok(existsSync(join(sessionLogsRoot(repo), "sessions", "s9.json")));
 });
 
@@ -114,7 +114,7 @@ test("prepare-commit-msg adds one Session and one Transcript trailer, idempotent
   const transcript = join(repo, "t.jsonl");
   writeFileSync(transcript, transcriptLines(4).join("\n") + "\n");
   mkdirSync(sessionLogsRoot(repo), { recursive: true });
-  writeCurrentSession(repo, { session_id: "s5", transcript_path: transcript });
+  recordActiveSession(repo, { session_id: "s5", transcript_path: transcript });
 
   const msgFile = join(repo, "COMMIT_EDITMSG");
   writeFileSync(msgFile, "Add feature\n");
@@ -140,7 +140,7 @@ test("prepare-commit-msg with no current session leaves the message untouched", 
 test("prepare-commit-msg does not block the commit when snapshotting fails", () => {
   const repo = tempRepo();
   mkdirSync(sessionLogsRoot(repo), { recursive: true });
-  writeCurrentSession(repo, { session_id: "s6", transcript_path: join(repo, "missing.jsonl") });
+  recordActiveSession(repo, { session_id: "s6", transcript_path: join(repo, "missing.jsonl") });
   const msgFile = join(repo, "COMMIT_EDITMSG");
   writeFileSync(msgFile, "Commit anyway\n");
   const result = spawnSync(process.execPath, [prepareHook, msgFile], { cwd: repo, encoding: "utf8" });

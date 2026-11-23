@@ -3,7 +3,7 @@
 // keep running (exit 2 on Stop would continue the conversation).
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { sessionLogsRoot, snapshotTranscript, writeCurrentSession } from "../capture/capture.ts";
+import { recordActiveSession, sessionLogsRoot, snapshotTranscript } from "../capture/capture.ts";
 
 interface StopInput {
   session_id: string;
@@ -31,7 +31,7 @@ function main(): void {
       throw new Error("hook input missing session_id or transcript_path");
     }
     snapshotTranscript(repoRoot, input.session_id, input.transcript_path);
-    writeCurrentSession(repoRoot, {
+    recordActiveSession(repoRoot, {
       session_id: input.session_id,
       transcript_path: input.transcript_path,
     });
