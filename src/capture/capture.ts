@@ -33,6 +33,8 @@ export interface Manifest {
   source: { agent: "claude-code"; transcript_path: string };
   includes_subagents: false;
   redactions: Record<string, number>;
+  // Entries not stored, counted by type (D38). Only conversation turns are stored.
+  excluded: Record<string, number>;
   created_at: string;
 }
 
@@ -52,6 +54,20 @@ export interface ActiveSession {
 
 export function sessionLogsRoot(repoRoot: string): string {
   return join(repoRoot, ".session-logs");
+}
+
+// Only conversation turns are stored (D38). Other entry types carry injected
+// system context (api-request-blob, attachments of subtype "instructions") or
+// runtime metadata; they are counted in the manifest instead.
+const STORED_TYPES = new Set(["user", "assistant"]);
+
+function entryType(line: string): string {
+  try {
+    const record = JSON.parse(line) as { type?: unknown };
+    return typeof record.type === "string" ? record.type : "unparsed";
+  } catch {
+    return "unparsed";
+  }
 }
 
 // Splits transcript lines into segments. A segment closes at 500 messages or
@@ -144,13 +160,19 @@ export function snapshotTranscript(
   // Redact before anything is hashed or written (D24). Only redacted text is
   // stored, and only its hash is kept in the index.
   const redactions: Record<string, number> = {};
+  const excluded: Record<string, number> = {};
   const lines = readFileSync(transcriptPath, "utf8")
     .split("\n")
     .filter((line) => line.length > 0)
-    .map((line) => {
+    .flatMap((line) => {
+      const type = entryType(line);
+      if (!STORED_TYPES.has(type)) {
+        excluded[type] = (excluded[type] ?? 0) + 1;
+        return [];
+      }
       const result = redact(line);
       mergeCounts(redactions, result.counts);
-      return result.text;
+      return [result.text];
     });
   const contentHash = sha256Hex(Buffer.from(lines.join("\n") + "\n", "utf8"));
 
@@ -180,6 +202,7 @@ export function snapshotTranscript(
     source: { agent: "claude-code", transcript_path: transcriptPath },
     includes_subagents: false,
     redactions,
+    excluded,
     created_at: now.toISOString(),
   };
   const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2) + "\n", "utf8");

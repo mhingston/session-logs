@@ -63,11 +63,23 @@ Run by the owner from an ordinary terminal: `claude -p "Reply OK."` in a fresh r
 
 - A commit in the same repo got `Session:` and `Transcript:` trailers with the real global hook chain. The `Transcript:` value points at a snapshot that exists.
 
-Still not verified: whether the Stop hook's stderr reaches the user, and whether a fork emits `SessionStart` with `resume`.
+## Live check results (`scripts/live-check.sh`, owner's terminal, 2026-11-23)
+
+- **Fork emits `SessionStart` with `source: "fork"`, not `"resume"`.** It carries a new `session_id`. The payload has no parent session field. Extra fields on the fork payload: `context_tokens`, `estimated_cache_write_usd`, `prompt_cache_likely_expired`, `seconds_since_last_response`. The design must not assume a parent id is passed; the parent is found through the transcript or our own records.
+- **Stop payload fields confirmed:** `session_id`, `transcript_path`, `cwd`, `hook_event_name`, `last_assistant_message`, `permission_mode`, `prompt_id`, `effort`, `background_tasks`, `session_crons`, `stop_hook_active`. Both the original run and the fork fired Stop.
+- **Stop hook stderr is not visible in `claude -p`.** The marker appeared in neither stdout nor stderr. That is not conclusive for interactive mode. The interactive check is still open.
+
+Still open: whether Stop hook stderr shows in an interactive session.
 
 ## Transcript contents (found while rendering a live transcript)
 
 A live transcript contains more than the conversation: session metadata, attachments, cost state, and `api-request-blob` entries. The `api-request-blob` entries carry the injected system context, which includes managed policy text, the user's CLAUDE.md and memory. Raw capture stores them (D7). Whether to keep them is an open owner decision (D38).
+
+## Handoff test plan checks (run 2026-11-23, scratch repo, real hooks)
+
+- **Test 12 (`--no-verify`): deviates from the spec.** A `--no-verify` commit still gets `Session:` and `Transcript:` trailers. Git skips only pre-commit and commit-msg under `--no-verify`, so `prepare-commit-msg` runs. The handoff expects no link and a `doctor` report. Decision needed (D42).
+- **Test 14 (`reset --hard`): passes.** The session index is unchanged, the linked commit stays in the reflog, and `doctor` reports no problems.
+- **Test 17 (50 MB snapshot): passes.** 45,885 messages took 178 ms through the real snapshot writer. An unchanged re-snapshot took 97 ms. Proposed threshold: 5 s (D43).
 
 ## Measured
 

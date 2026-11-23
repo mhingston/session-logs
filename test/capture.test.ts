@@ -164,3 +164,25 @@ test("secrets are redacted before any segment is written, and counts are recorde
     assert.ok(stored.includes("[REDACTED:aws-access-key]"));
   }
 });
+
+test("non-conversation entries are not stored and are counted in the manifest (D38)", () => {
+  const repo = tempRepo();
+  const transcript = join(repo, "t.jsonl");
+  const injected = "RAC Engineering Standards: injected policy text"; // fabricated marker
+  writeFileSync(
+    transcript,
+    [
+      JSON.stringify({ type: "user", text: "real question" }),
+      JSON.stringify({ type: "api-request-blob", message: injected }),
+      JSON.stringify({ type: "attachment", attachment: { type: "instructions", files: [injected] } }),
+      JSON.stringify({ type: "assistant", text: "real answer" }),
+    ].join("\n") + "\n",
+  );
+  const snapshot = snapshotTranscript(repo, "s-d38", transcript);
+  const root = sessionLogsRoot(repo);
+  const manifest = JSON.parse(readFileSync(join(root, "snapshots", `${snapshot}.json`), "utf8"));
+  assert.deepEqual(manifest.excluded, { "api-request-blob": 1, attachment: 1 });
+  const stored = manifest.segments.map((seg: { sha256: string }) => readFileSync(join(root, "objects", seg.sha256), "utf8")).join("");
+  assert.ok(!stored.includes("injected policy text"));
+  assert.ok(stored.includes("real question") && stored.includes("real answer"));
+});

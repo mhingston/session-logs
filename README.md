@@ -2,7 +2,7 @@
 
 Record Claude Code session transcripts and link them to the git commits they produced.
 
-> **Status: early development.** Local capture works: a Claude Code `Stop` hook snapshots the transcript, and a git hook adds `Session:` and `Transcript:` trailers. Secrets are redacted before anything is written. Read commands exist (`sessions show`, `commits`, `list`). Commit trailers are handled for amend, squash, cherry-pick, rebase and revert. `fork`, `doctor` and `prune` exist. Remote push and pull, and the notes index, are not built yet. The live Claude Code run has not been verified.
+> **Status: early development.** Local capture works: a Claude Code `Stop` hook snapshots the transcript, and a git hook adds `Session:` and `Transcript:` trailers. Secrets are redacted before anything is written. Read commands exist (`sessions show`, `commits`, `list`). Commit trailers are handled for amend, squash, cherry-pick, rebase and revert. `fork`, `doctor` and `prune` exist. Remote push and fetch exist as library code, not yet wired to any command. The notes index is not built. The live Claude Code run has not been verified.
 
 ## What it will do
 
@@ -80,6 +80,10 @@ const store = createRemoteStore({
 - **Redaction:** not implemented yet. Do not enable remote storage until the redaction pass exists (see decision D24).
 
 Objects are content-addressed by SHA-256. Writes are idempotent, and both reads and writes verify the bytes against their hash.
+
+## What is stored
+
+Only `user` and `assistant` conversation entries are stored (D44). Session metadata, cost state, and injected system context (CLAUDE.md, managed policy, memory) are not stored. The manifest counts what was excluded, by type.
 
 ## Development
 

@@ -155,3 +155,15 @@ test("rebase onto a new base keeps trailers and adds no session", () => {
 function appendTurn(path: string, text: string): void {
   appendFileSync(path, JSON.stringify({ type: "user", text }) + "\n");
 }
+
+test("a --no-verify commit is still linked to the session (D42)", () => {
+  const repo = setupRepo();
+  const t = transcript(repo, "nv", "work");
+  commit(repo, "base.txt", "Base", "10:00");
+  recordActiveSession(repo, { session_id: "nv-s", transcript_path: t }, at("10:10"));
+  writeFileSync(join(repo, "nv.txt"), "x\n");
+  git(repo, ["add", "nv.txt"]);
+  git(repo, ["commit", "-q", "--no-verify", "-m", "No verify"], iso("10:20"));
+  assert.deepEqual(trailerLines(repo).filter((l) => l.startsWith("Session: ")), ["Session: nv-s"]);
+  cleanup(repo);
+});
