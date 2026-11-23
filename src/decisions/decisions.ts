@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { sessionLogsRoot, writeFileAtomic } from "../capture/capture.ts";
+import { readConfig } from "../capture/config.ts";
 import { entryToText, readManifest, readSnapshotLines } from "../read/read.ts";
 import { sha256Hex } from "../storage/object-store.ts";
 
@@ -44,20 +45,6 @@ export interface DecisionExtract {
   // sha256 of the snapshot's stored lines, as in the sessions index (D37).
   source_content_sha256: string;
   decisions: ExtractedDecision[];
-}
-
-interface ConfigFile {
-  decisions?: { enabled?: unknown };
-}
-
-function readConfig(repoRoot: string): ConfigFile {
-  const file = join(sessionLogsRoot(repoRoot), "config.json");
-  if (!existsSync(file)) return {};
-  try {
-    return JSON.parse(readFileSync(file, "utf8")) as ConfigFile;
-  } catch {
-    throw new Error(`${file} is not valid JSON`);
-  }
 }
 
 // Off unless the repository's config sets decisions.enabled to true.
