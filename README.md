@@ -12,7 +12,7 @@ You need Node.js 23.6 or later (`node -v`), git, and Claude Code.
 # 1. Install and check this tool (once)
 cd /path/to/session-logs
 npm install
-npm run check          # type-check and tests; should report 67 passing
+npm run check          # type-check and tests; should report 77 passing
 
 # 2. Turn it on in a repository (once per repository, per clone)
 cd /path/to/your-repo
@@ -84,7 +84,7 @@ Forks link to their parent automatically when Claude Code forks a session (`clau
 |---|---|---|
 | Transcripts, snapshots, session records | `.session-logs/` in the repository | Gitignored. Local only. |
 | Commit hooks | `.session-logs/git-hooks/` | Set as the repository's `core.hooksPath`. |
-| Stop hook registration | `.claude/settings.local.json` | Per developer. Gitignored. |
+| Claude Code hook registration (Stop, UserPromptSubmit) | `.claude/settings.local.json` | Per developer. Gitignored. |
 | Git notes (session links per commit) | `.session-logs/notes.git` | A bare repository, read through git alternates. Rebuildable from trailers. Nothing is written to the main repository's refs. |
 | Hook errors | `.session-logs/errors.log` | Error text only; never transcript content. |
 | Decisions and findings | `docs/DECISIONS.md`, `docs/M0-findings.md` | |
@@ -93,8 +93,11 @@ Forks link to their parent automatically when Claude Code forks a session (`clau
 
 `init` does three things in the repository:
 
-1. Points `core.hooksPath` at `.session-logs/git-hooks`. Each shim runs your global hook of the same name first, then session-logs. For `prepare-commit-msg`, it also runs the repository's own `.git/hooks` script.
-2. Registers the Stop hook in `.claude/settings.local.json`.
+1. Points `core.hooksPath` at `.session-logs/git-hooks`. Each git hook shim runs your global hook of the same name first, then session-logs:
+   - `prepare-commit-msg` adds the session trailers, and also runs the repository's own `.git/hooks` script.
+   - `post-commit` and `post-rewrite` refresh the git notes.
+   - `pre-commit` and `commit-msg` only chain to your existing hooks.
+2. Registers two Claude Code hooks in `.claude/settings.local.json`: `UserPromptSubmit` (marks a turn open, so commits made mid-turn link to it) and `Stop` (snapshots the transcript).
 3. Adds `.session-logs/` and `.claude/settings.local.json` to `.gitignore`.
 
 It refuses to replace a `core.hooksPath` it did not set (for example Husky's), so it cannot silently disable other tools. It is safe to re-run.
@@ -134,6 +137,17 @@ Before connecting it, read these access notes:
 ## Design
 
 The decision log is [`docs/DECISIONS.md`](docs/DECISIONS.md). The spike findings, including the live Claude Code checks, are in [`docs/M0-findings.md`](docs/M0-findings.md).
+
+## Verifying against real Claude Code
+
+Unit tests do not call Claude Code. To check the hooks against a live session, run this in your own terminal (it needs API access):
+
+```sh
+cd /path/to/session-logs
+scripts/live-check.sh
+```
+
+It creates a throwaway repository, runs a session and a fork, and prints the hook payload fields and the fork's `SessionStart` source. The results from the last run are in `docs/M0-findings.md`.
 
 ## Development
 
