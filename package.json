@@ -8,10 +8,16 @@
     "node": ">=23.6"
   },
   "scripts": {
-    "test": "node --test test/*.test.ts"
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.ts",
+    "check": "npm run typecheck && npm test"
   },
   "dependencies": {
     "@azure/identity": "4.14.1",
     "@azure/storage-blob": "12.34.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "5.9.3"
   }
 }

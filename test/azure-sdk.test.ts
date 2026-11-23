@@ -54,7 +54,9 @@ test("upload and exists delegate to the SDK client", async () => {
   assert.equal(await blob.exists(), true);
   await blob.upload(new Uint8Array([1, 2, 3]));
   assert.equal(uploaded.length, 1);
-  assert.deepEqual([...uploaded[0]], [1, 2, 3]);
+  const first = uploaded[0];
+  assert.ok(first);
+  assert.deepEqual([...first], [1, 2, 3]);
 });
 
 test("openAzureContainer returns blob handles without contacting Azure", () => {
