@@ -40,6 +40,19 @@ Status: spike partly complete. Claude Code hook contract checked against the liv
 - Squash (M3): use `addIfDifferent` so duplicate `Session:` and `Transcript:` lines collapse.
 - Cherry-pick: keep existing trailers, add nothing new.
 
+## Git hooks on this machine
+
+- Global `core.hooksPath` is `~/.config/git/hooks`. Repo-local `.git/hooks/prepare-commit-msg` is **ignored** while it is set. There is no global `prepare-commit-msg`, so installation needs a decision (D32).
+- Existing global `pre-commit` (chains to Husky) and `post-commit` (Repowise) hooks would be shadowed by a repo-local `core.hooksPath`.
+
+## Smoke test (M1 hooks, simulated Stop payload)
+
+Run in fake repositories under the temp directory, with the Stop hook driven by a hand-written JSON payload. Claude Code itself was not run.
+
+- Two commits, each after a Stop: each links to its own snapshot; `Session:` and `Transcript:` each appear once.
+- Amend with an unchanged transcript: one of each trailer, and no new snapshot.
+- Snapshot store made read-only: the commit succeeds, a warning is printed, the error is logged without content, and the earlier snapshot is intact.
+
 ## Measured
 
 - Segmenting, hashing and manifest build for a 50 MB synthetic transcript (45,155 messages, 91 segments): about 49 ms of CPU. Excludes git object writes and Blob uploads, so it is a lower bound. Re-measure with real git writes in M1.

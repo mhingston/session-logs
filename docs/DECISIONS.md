@@ -16,9 +16,10 @@ Supersedes the handoff's D1, D3, D6, D9 (partly), D11 where noted.
 | 2026-11-23 | D26 | Hook failures warn and never block the commit. Errors are logged locally, without transcript content. | Owner accepted recommendation (Q10); matches handoff test 11. |
 | 2026-11-23 | D27 | Audience includes engineers, reviewers and auditors. Retention and formatting must support audit use. | Owner answer (Q9). |
 | 2026-11-23 | D28 | Language is TypeScript. Location is `~/Downloads/session-logs`. | Owner answer (Q1). Note: not a git repo yet; see blocker. |
-
 | 2026-11-23 | D29 | Azure Blob adapter is written and tested, but disabled by default. No container is configured or used until the owner enables it per repository. | Owner decision: build and test now, do not use yet. |
 | 2026-11-23 | D30 | Trailer writes use `--if-exists replace` for amend and commit, `addIfDifferent` for squash. `replaceIfDifferent` is not a valid git value. | Verified on git 2.56.1. Corrects handoff §5. |
 | 2026-11-23 | D31 | Local store directory is `.session-logs/` (renamed from `.sessionlogs/`). | Owner request. Supersedes the name in D17. |
+| 2026-11-23 | D32 | Git hook installation must chain to the user's global `core.hooksPath`. A repo-local `core.hooksPath` shadows the global hooks (Husky pre-commit and Repowise post-commit on this machine), so it cannot be set naively. Decision pending: chain global hooks from our hook directory, or add a global `prepare-commit-msg` that checks per-repo opt-in. | Found in smoke test: `.git/hooks` is ignored when the global `core.hooksPath` is set. |
+| 2026-11-23 | D33 | MIT licence. | Owner decision. |
 
 Open: object-store container owner, and whether the `Transcript:` hash format is final (D20).

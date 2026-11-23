@@ -2,7 +2,7 @@
 
 Record Claude Code session transcripts and link them to the git commits they produced.
 
-> **Status: early development.** Only the storage layer exists so far. There is no capture hook, no commit trailers and no command-line tool yet. Nothing here captures transcripts from your sessions.
+> **Status: early development.** The local capture core and two hooks exist: a Claude Code `Stop` hook that snapshots the transcript, and a git `prepare-commit-msg` hook that adds `Session:` and `Transcript:` trailers. Nothing installs them yet, there is no command-line tool, and redaction is not implemented.
 
 ## What it will do
 
@@ -71,6 +71,9 @@ src/storage/object-store.ts      provider-agnostic interface and hashing
 src/storage/azure-blob-store.ts  content-addressed store over a narrow container interface
 src/storage/azure-sdk.ts         Azure SDK adapter (the only file that imports the SDK)
 src/storage/remote-config.ts     opt-in factory; remote is off by default
+src/capture/capture.ts           segmenting, manifest and snapshot writer (local .session-logs/)
+src/hooks/stop.ts                Claude Code Stop hook; always exits 0
+src/hooks/prepare-commit-msg.ts  git hook that adds trailers; always exits 0
 test/                            node:test suites
 docs/                            decision log and spike findings
 ```
@@ -79,4 +82,4 @@ Claude Code is the only agent this design targets. Agent-specific code will sit 
 
 ## Licence
 
-Not yet decided.
+MIT. See [`LICENSE`](LICENSE).
