@@ -2,7 +2,7 @@
 
 Record Claude Code session transcripts and link them to the git commits they produced.
 
-> **Status: early development.** The local capture core and two hooks exist: a Claude Code `Stop` hook that snapshots the transcript, and a git `prepare-commit-msg` hook that adds `Session:` and `Transcript:` trailers. Nothing installs them yet, there is no command-line tool, and redaction is not implemented.
+> **Status: early development.** Local capture works: a Claude Code `Stop` hook snapshots the transcript, and a git hook adds `Session:` and `Transcript:` trailers. Secrets are redacted before anything is written. Read commands (`show`, `commits`, `list`) and git-operation handling (rebase, cherry-pick, forks) are not built yet. The live Claude Code run has not been verified.
 
 ## What it will do
 
@@ -21,6 +21,16 @@ Design decisions are recorded in [`docs/DECISIONS.md`](docs/DECISIONS.md). Findi
 | Azure Blob Storage | **Off** | Opt-in per repository. Sync is not wired into any command yet. |
 
 Transcripts can contain secrets and personal data. Read the privacy notes before you enable anything.
+
+## Installing into a repository
+
+From inside the target repository:
+
+```sh
+node /path/to/session-logs/src/cli/init.ts
+```
+
+This points `core.hooksPath` at managed hooks under `.session-logs/git-hooks`, which chain your global hooks first. It registers the Stop hook in `.claude/settings.local.json` and adds `.session-logs/` and that file to `.gitignore`. It refuses to replace a `core.hooksPath` it did not set, such as Husky's. Re-running it is safe.
 
 ## Remote storage (Azure Blob)
 

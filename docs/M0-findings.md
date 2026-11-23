@@ -53,6 +53,18 @@ Run in fake repositories under the temp directory, with the Stop hook driven by 
 - Amend with an unchanged transcript: one of each trailer, and no new snapshot.
 - Snapshot store made read-only: the commit succeeds, a warning is printed, the error is logged without content, and the earlier snapshot is intact.
 
+## Live Claude Code run (verified 2026-11-23)
+
+Run by the owner from an ordinary terminal: `claude -p "Reply OK."` in a fresh repo (`~/Downloads/foo`) after `init`.
+
+- The Stop hook fired on a completed turn. `current.json` held the real `session_id` and `transcript_path` (`~/.claude/projects/<project>/<session_id>.jsonl`).
+- The snapshot was written: session index, manifest and objects all exist. The `cwd` field was present, since the snapshot landed in the repo.
+- No `errors.log` was written.
+
+- A commit in the same repo got `Session:` and `Transcript:` trailers with the real global hook chain. The `Transcript:` value points at a snapshot that exists.
+
+Still not verified: whether the Stop hook's stderr reaches the user, and whether a fork emits `SessionStart` with `resume`.
+
 ## Measured
 
 - Segmenting, hashing and manifest build for a 50 MB synthetic transcript (45,155 messages, 91 segments): about 49 ms of CPU. Excludes git object writes and Blob uploads, so it is a lower bound. Re-measure with real git writes in M1.

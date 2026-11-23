@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { sha256Hex } from "../storage/object-store.ts";
+import { mergeCounts, redact } from "./redact.ts";
 
 // M1 capture core. Local store only: .session-logs/ inside the repository.
 //
@@ -31,6 +32,7 @@ export interface Manifest {
   segments: SegmentRef[];
   source: { agent: "claude-code"; transcript_path: string };
   includes_subagents: false;
+  redactions: Record<string, number>;
   created_at: string;
 }
 
@@ -112,7 +114,17 @@ export function snapshotTranscript(
     return existing.snapshot;
   }
 
-  const lines = raw.toString("utf8").split("\n").filter((line) => line.length > 0);
+  // Redact before anything is written (D24). Only redacted text is stored.
+  const redactions: Record<string, number> = {};
+  const lines = raw
+    .toString("utf8")
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const result = redact(line);
+      mergeCounts(redactions, result.counts);
+      return result.text;
+    });
   const segments: SegmentRef[] = [];
   mkdirSync(join(root, "objects"), { recursive: true });
   for (const group of segmentLines(lines)) {
@@ -132,6 +144,7 @@ export function snapshotTranscript(
     segments,
     source: { agent: "claude-code", transcript_path: transcriptPath },
     includes_subagents: false,
+    redactions,
     created_at: now.toISOString(),
   };
   const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2) + "\n", "utf8");

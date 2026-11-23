@@ -148,3 +148,19 @@ test("prepare-commit-msg does not block the commit when snapshotting fails", () 
   assert.match(result.stderr, /could not link/);
   assert.equal(readFileSync(msgFile, "utf8"), "Commit anyway\n");
 });
+
+test("secrets are redacted before any segment is written, and counts are recorded", () => {
+  const repo = tempRepo();
+  const transcript = join(repo, "t.jsonl");
+  const secret = "AKIAABCDEFGHIJKLMNOP"; // fabricated test value
+  writeFileSync(transcript, JSON.stringify({ type: "user", text: `use ${secret} please` }) + "\n");
+  const snapshot = snapshotTranscript(repo, "s-redact", transcript);
+  const root = sessionLogsRoot(repo);
+  const manifest = JSON.parse(readFileSync(join(root, "snapshots", `${snapshot}.json`), "utf8"));
+  assert.deepEqual(manifest.redactions, { "aws-access-key": 1 });
+  for (const seg of manifest.segments) {
+    const stored = readFileSync(join(root, "objects", seg.sha256), "utf8");
+    assert.ok(!stored.includes(secret));
+    assert.ok(stored.includes("[REDACTED:aws-access-key]"));
+  }
+});

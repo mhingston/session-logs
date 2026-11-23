@@ -21,5 +21,7 @@ Supersedes the handoff's D1, D3, D6, D9 (partly), D11 where noted.
 | 2026-11-23 | D31 | Local store directory is `.session-logs/` (renamed from `.sessionlogs/`). | Owner request. Supersedes the name in D17. |
 | 2026-11-23 | D32 | Git hook installation must chain to the user's global `core.hooksPath`. A repo-local `core.hooksPath` shadows the global hooks (Husky pre-commit and Repowise post-commit on this machine), so it cannot be set naively. Decision pending: chain global hooks from our hook directory, or add a global `prepare-commit-msg` that checks per-repo opt-in. | Found in smoke test: `.git/hooks` is ignored when the global `core.hooksPath` is set. |
 | 2026-11-23 | D33 | MIT licence. | Owner decision. |
+| 2026-11-23 | D34 | Resolves D32. `session-logs init` sets a repo-local `core.hooksPath` to managed shims that first run the matching global hook, then session-logs. `prepare-commit-msg` also chains the repo's own hook (the global set has no counterpart). It refuses to replace a repo-local `core.hooksPath` it did not set. Stop is registered in `.claude/settings.local.json`, and `.session-logs/` and that file are gitignored. | Implements the recommendation in the last session. Verified with the real global config: Husky and Repowise chain without errors. |
+| 2026-11-23 | D35 | Redaction runs on each line before segmenting, so only redacted text is stored. Manifest records counts per kind. Best effort (D24). | M1 requirement (handoff §7). |
 
 Open: object-store container owner, and whether the `Transcript:` hash format is final (D20).
