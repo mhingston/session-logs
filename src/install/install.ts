@@ -29,7 +29,24 @@ export interface InstallResult {
   settingsFile: string;
 }
 
-const GIT_HOOK_NAMES = ["pre-commit", "commit-msg", "post-commit", "prepare-commit-msg"] as const;
+// Hooks session-logs manages. `ours` is the session-logs script run after the
+// chained hooks. `stdin` hooks get their input buffered, because a chained hook would
+// otherwise consume it. `repoChain` also runs the repository's own hook of that name.
+interface HookSpec {
+  ours?: string;
+  stdin?: boolean;
+  repoChain?: boolean;
+}
+
+export const HOOK_SPECS: Record<string, HookSpec> = {
+  "pre-commit": {},
+  "commit-msg": {},
+  "post-commit": { ours: "src/hooks/post-commit.ts" },
+  "post-rewrite": { ours: "src/hooks/post-rewrite.ts", stdin: true },
+  "prepare-commit-msg": { ours: "src/hooks/prepare-commit-msg.ts", repoChain: true },
+};
+
+const GIT_HOOK_NAMES = Object.keys(HOOK_SPECS);
 
 function sh(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -44,20 +61,39 @@ function git(repoRoot: string, args: string[]): string | undefined {
 }
 
 export function shimBody(
-  name: (typeof GIT_HOOK_NAMES)[number],
+  name: string,
   repoGitHooks: string,
   globalHooksPath: string | undefined,
   toolRoot: string,
 ): string {
-  const lines = ["#!/bin/sh", "# Managed by session-logs. Chains global and repository hooks, then session-logs."];
-  if (globalHooksPath) {
-    lines.push(`g=${sh(join(globalHooksPath, name))}`, `[ -x "$g" ] && { "$g" "$@" || exit $?; }`);
+  const spec = HOOK_SPECS[name];
+  if (!spec) {
+    throw new Error(`no hook spec for ${name}`);
   }
-  if (name === "prepare-commit-msg") {
-    lines.push(`r=${sh(join(repoGitHooks, name))}`, `[ -x "$r" ] && { "$r" "$@" || exit $?; }`);
-    lines.push(`exec node ${sh(join(toolRoot, "src/hooks/prepare-commit-msg.ts"))} "$@"`);
-  } else if (!globalHooksPath) {
-    lines.push(`r=${sh(join(repoGitHooks, name))}`, `[ -x "$r" ] && { "$r" "$@" || exit $?; }`);
+  const lines = ["#!/bin/sh", "# Managed by session-logs. Chains global and repository hooks, then session-logs."];
+  if (spec.stdin) {
+    lines.push(
+      `in=$(mktemp "\${TMPDIR:-/tmp}/session-logs-stdin.XXXXXX") || exit 1`,
+      `trap 'rm -f "$in"' EXIT`,
+      `cat > "$in"`,
+    );
+  }
+  const run = (path: string) => (spec.stdin ? `"${path}" "$@" < "$in"` : `"${path}" "$@"`);
+  if (globalHooksPath) {
+    lines.push(`g=${sh(join(globalHooksPath, name))}`, `[ -x "$g" ] && { ${run("$g")} || exit $?; }`);
+  }
+  if (spec.repoChain || !globalHooksPath) {
+    lines.push(`r=${sh(join(repoGitHooks, name))}`, `[ -x "$r" ] && { ${run("$r")} || exit $?; }`);
+  }
+  if (spec.ours) {
+    const script = sh(join(toolRoot, spec.ours));
+    if (name === "prepare-commit-msg") {
+      // Must not fail the commit; the script always exits 0 itself.
+      lines.push(`exec node ${script} "$@"`);
+    } else {
+      // Post hooks cannot block; their failures are ignored.
+      lines.push(spec.stdin ? `node ${script} "$@" < "$in" || true` : `node ${script} "$@" || true`);
+    }
   }
   lines.push("exit 0", "");
   return lines.join("\n");

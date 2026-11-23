@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { commitsForSession, listSessions, renderSnapshot, snapshotForCommit } from "../read/read.ts";
 import { sessionLogsRoot } from "../capture/capture.ts";
 import { doctor, forkSession, pruneSessions } from "../maintain/maintain.ts";
+import { readNote, rebuildNotes } from "../notes/notes.ts";
 
 function git(args: string[]): string | undefined {
   try {
@@ -20,7 +21,7 @@ function git(args: string[]): string | undefined {
 function usage(): void {
   console.error(
     "usage: sessions show <rev> [--raw] | commits <session> | list | fork <session> --at <snapshot>\n" +
-      "       sessions doctor | prune [--older-than <days>] [--include-linked] [--apply]",
+      "       sessions doctor | prune [--older-than <days>] [--include-linked] [--apply] | notes show <rev> | notes rebuild",
   );
   process.exitCode = 2;
 }
@@ -91,6 +92,24 @@ function main(argv: string[]): void {
     console.log(`forked session ${result.session_id}`);
     console.log(`first snapshot ${result.snapshot}`);
     return;
+  }
+  if (command === "notes") {
+    const sub = rest[0];
+    if (sub === "rebuild") {
+      console.log(`rebuilt notes for ${rebuildNotes(repoRoot)} linked commit(s) in .session-logs/notes.git`);
+      return;
+    }
+    if (sub === "show" && rest[1]) {
+      const commit = git(["-C", repoRoot, "rev-parse", "--verify", `${rest[1]}^{commit}`]);
+      const note = commit ? readNote(repoRoot, commit) : undefined;
+      if (note === undefined) {
+        console.log("no note");
+        return;
+      }
+      process.stdout.write(note);
+      return;
+    }
+    return usage();
   }
   if (command === "doctor") {
     for (const finding of doctor(repoRoot)) {

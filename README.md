@@ -2,7 +2,7 @@
 
 Record Claude Code session transcripts and link every git commit to the session that produced it.
 
-> **Status: working locally, not yet shareable.** Capture, commit linking, reading, forks, `doctor` and `prune` work on one machine. Remote sync is library code only and is not connected to any command. See [What is not done](#what-is-not-done).
+> **Status: working locally, not yet shareable.** Capture, commit linking (including commits made mid-turn), git notes, reading, forks, `doctor` and `prune` work on one machine. Remote sync is library code only and is not connected to any command. See [What is not done](#what-is-not-done).
 
 ## Quick start
 
@@ -45,6 +45,7 @@ If `show` finds nothing, run `doctor` (below) first.
 - **Reads** a commit's transcript as it was when the commit was made, even after the session continued.
 - **Redacts** common secret formats (private keys, cloud and API keys, bearer tokens, connection strings) before anything is written. This is best effort. Do not rely on it as the only control.
 - **Keeps your git hooks working.** Your global hooks (for example Husky or Repowise) still run first.
+- **Links commits made mid-turn.** A commit made while Claude is working links to that session, however many commits it makes in that turn. A turn left open for more than 2 hours (for example after an interrupt) no longer claims commits.
 
 ## Commands
 
@@ -57,13 +58,17 @@ node $S list                             # sessions recorded in this repository
 node $S commits <session-id>             # commits linked to a session
 node $S show <rev>                       # transcript as it was at that commit (conversation turns only)
 node $S show <rev> --raw                 # stored JSONL, one entry per line
-node $S doctor                           # health check: hooks, store integrity, unlinked commits
+node $S doctor                           # health check: hooks, store integrity, unlinked commits, missing notes
+node $S notes show <rev>                 # the git note for a commit (its session trailers)
+node $S notes rebuild                    # rebuild every note from trailers
 node $S fork <session> --at <snapshot>   # new session record starting from an earlier snapshot
 node $S prune --older-than 30            # dry run: which old, unlinked sessions would be removed
 node $S prune --older-than 30 --apply    # delete them
 ```
 
 Pruning is **off** unless you pass `--older-than` or set `prune.olderThanDays` in `.session-logs/config.json`. It removes whole sessions only, and never linked ones unless you pass `--include-linked`. Pruning a linked session makes `show` fail for those commits.
+
+Git notes: each linked commit also has a git note, `sessions notes show <rev>`, derived from its trailers. Notes are updated on commit and rewrite. They live under `.session-logs/notes.git`, not in the main repository's refs.
 
 Forks link to their parent automatically when Claude Code forks a session (`claude --resume <id> --fork-session`). The parent is found from message IDs that the fork shares with stored transcripts.
 
@@ -80,6 +85,7 @@ Forks link to their parent automatically when Claude Code forks a session (`clau
 | Transcripts, snapshots, session records | `.session-logs/` in the repository | Gitignored. Local only. |
 | Commit hooks | `.session-logs/git-hooks/` | Set as the repository's `core.hooksPath`. |
 | Stop hook registration | `.claude/settings.local.json` | Per developer. Gitignored. |
+| Git notes (session links per commit) | `.session-logs/notes.git` | A bare repository, read through git alternates. Rebuildable from trailers. Nothing is written to the main repository's refs. |
 | Hook errors | `.session-logs/errors.log` | Error text only; never transcript content. |
 | Decisions and findings | `docs/DECISIONS.md`, `docs/M0-findings.md` | |
 
@@ -102,6 +108,8 @@ It refuses to replace a `core.hooksPath` it did not set (for example Husky's), s
 - **`doctor` reports an unlinked commit during a session.** This is a heuristic: it thinks a session was active when the commit was made. Check it. Commits made with `--no-verify` are still linked, by design (D45).
 - **A commit has no trailers.** Read `.session-logs/errors.log`. The commit still succeeds when a hook fails, by design.
 - **`prune` says it is off.** Pass `--older-than <days>`.
+- **`doctor` warns that linked commits have no note.** Run `sessions notes rebuild`.
+- **Commits made mid-turn have no link.** Re-run `init`. It registers the `UserPromptSubmit` hook, which older installs lack.
 - **Hooks stopped working after moving the checkout.** Re-run `init`.
 
 ## Remote storage (not connected)
@@ -119,7 +127,6 @@ Before connecting it, read these access notes:
 ## What is not done
 
 - **Remote sync command and container:** library code only. Needs an owner decision on the container.
-- **Notes index** (`refs/notes/sessions`, optional in the design): not built.
 - **Subagent transcripts:** not captured (D23).
 - **Redaction:** best effort and pattern-based. It misses secrets that do not match a known format.
 - **Concurrent sessions in one repository:** a commit links the most recent session that stopped since the previous commit, and lists others as `Also-Active:`. The link is a heuristic, not proof of which session wrote the change.
@@ -142,8 +149,9 @@ Layout:
 ```
 src/cli/               sessions (read and maintenance) and init entry points
 src/capture/           capture core, redaction, commit-trailer rules
-src/hooks/             Claude Code Stop hook and git prepare-commit-msg hook
+src/hooks/             Claude Code Stop and UserPromptSubmit hooks; git commit, post-commit and post-rewrite hooks
 src/install/           init: hook shims and settings registration
+src/notes/             git notes under .session-logs/notes.git
 src/read/              show, commits, list
 src/maintain/          fork, doctor, prune
 src/remote/            push and fetch (not connected)

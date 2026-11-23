@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { activityAt, allActiveSessions, sessionLogsRoot, type Manifest, type SessionIndex } from "../capture/capture.ts";
 import { sha256Hex } from "../storage/object-store.ts";
 import { readSnapshotLines, readManifest, commitsForSession } from "../read/read.ts";
+import { readNote } from "../notes/notes.ts";
 
 const HASH = /^[0-9a-f]{64}$/;
 
@@ -123,6 +124,7 @@ export function doctor(repoRoot: string): Finding[] {
   );
   const activeSessions = allActiveSessions(repoRoot);
   let unlinkedDuringSession = 0;
+  let missingNotes = 0;
   for (const record of log.split("\x1e")) {
     const [hash, committed, body] = record.split("\x1f");
     if (!hash || body === undefined || !committed) continue;
@@ -142,6 +144,9 @@ export function doctor(repoRoot: string): Finding[] {
         findings.push({ level: "warn", message: `commit ${hash.slice(0, 12)} names session ${session}, which has no record here` });
       }
     }
+    if (sessions.length > 0 && readNote(repoRoot, hash.trim()) === undefined) {
+      missingNotes += 1;
+    }
     if (sessions.length === 0) {
       const t = Date.parse(committed);
       const during = activeSessions.find((s) => Date.parse(s.first_stop_at) <= t && t <= Date.parse(activityAt(s)));
@@ -153,6 +158,9 @@ export function doctor(repoRoot: string): Finding[] {
         });
       }
     }
+  }
+  if (missingNotes > 0) {
+    findings.push({ level: "warn", message: `${missingNotes} linked commit(s) have no session note; run sessions notes rebuild` });
   }
   if (unlinkedDuringSession === 0) {
     findings.push({ level: "info", message: "no unlinked commits found during recorded sessions" });
