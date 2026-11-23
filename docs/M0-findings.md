@@ -83,6 +83,15 @@ A live transcript contains more than the conversation: session metadata, attachm
 - **Test 14 (`reset --hard`): passes.** The session index is unchanged, the linked commit stays in the reflog, and `doctor` reports no problems.
 - **Test 17 (50 MB snapshot): passes.** 45,885 messages took 178 ms through the real snapshot writer. An unchanged re-snapshot took 97 ms. Proposed threshold: 5 s (D43).
 
+## Live check 2 (`scripts/live-check.sh`, owner's terminal, 2026-11-23, after D50)
+
+- **UserPromptSubmit payload confirmed.** Fields: `session_id`, `transcript_path`, `cwd`, `prompt`, `prompt_id`, `permission_mode`, `hook_event_name`. The `prompt` field holds the user's text. Our hook does not store it; it only records the turn start (D50).
+- **Fork confirmed again:** `SessionStart` `source: "fork"` with a new `session_id`.
+- **Hooks recorded both sessions.** Each has an active record with `turn_open_at` and `last_stop_at`, plus a session index.
+- **Fork parent link (D48) verified on live data.** The fork's first snapshot points at the original session.
+- **No hook errors** (no `errors.log`).
+- Stop stderr marker still absent from `claude -p` output (consistent with D49).
+
 ## Measured
 
 - Segmenting, hashing and manifest build for a 50 MB synthetic transcript (45,155 messages, 91 segments): about 49 ms of CPU. Excludes git object writes and Blob uploads, so it is a lower bound. Re-measure with real git writes in M1.
