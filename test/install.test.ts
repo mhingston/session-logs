@@ -57,6 +57,17 @@ test("install is idempotent: one Stop hook and one gitignore line each", () => {
   assert.equal(gitignore.split("\n").filter((l) => l === ".session-logs/").length, 1);
 });
 
+test("re-running init from a moved toolRoot replaces stale hook entries without duplicating", () => {
+  const repo = tempRepo();
+  installHooks({ repoRoot: repo, toolRoot: "/old/checkout/session-logs" });
+  const moved = installHooks({ repoRoot: repo, toolRoot: TOOL_ROOT });
+  const settings = JSON.parse(readFileSync(moved.settingsFile, "utf8"));
+  assert.equal(settings.hooks.Stop.length, 1);
+  assert.equal(settings.hooks.UserPromptSubmit.length, 1);
+  assert.ok(settings.hooks.Stop[0].hooks[0].command.includes(TOOL_ROOT));
+  assert.ok(!settings.hooks.Stop[0].hooks[0].command.includes("/old/checkout/session-logs"));
+});
+
 test("install refuses to replace a repo-local core.hooksPath it did not set", () => {
   const repo = tempRepo();
   git(repo, ["config", "--local", "core.hooksPath", ".husky/_"]);

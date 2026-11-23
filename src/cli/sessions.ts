@@ -5,7 +5,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { commitsForSession, listSessions, renderSnapshot, snapshotForCommit } from "../read/read.ts";
+import { commitsForSession, listSessions, renderSnapshot, snapshotsForCommit } from "../read/read.ts";
 import { sessionLogsRoot } from "../capture/capture.ts";
 import { doctor, forkSession, pruneSessions } from "../maintain/maintain.ts";
 import { readNote, rebuildNotes } from "../notes/notes.ts";
@@ -18,11 +18,23 @@ function git(args: string[]): string | undefined {
   }
 }
 
+const HELP = [
+  "usage: sessions <command> [options]",
+  "",
+  "Commands:",
+  "  list [--full]                               List recorded sessions (use --full for 64-char snapshot IDs)",
+  "  show <rev> [--raw] [--session <id>]         Show transcript(s) linked to a commit",
+  "  commits <session-id>                        List commits linked to a session",
+  "  notes show <rev>                            Show the git note for a commit",
+  "  notes rebuild                               Rebuild all git notes from commit trailers",
+  "  fork <session-id> --at <snapshot>           Create a new session record from a snapshot (ID or unique prefix)",
+  "  doctor                                      Check hooks, store integrity, unlinked commits, and notes",
+  "  prune [--older-than <days>] [--include-linked] [--apply]",
+  "                                              Dry-run or delete old unlinked sessions",
+].join("\n");
+
 function usage(): void {
-  console.error(
-    "usage: sessions show <rev> [--raw] | commits <session> | list | fork <session> --at <snapshot>\n" +
-      "       sessions doctor | prune [--older-than <days>] [--include-linked] [--apply] | notes show <rev> | notes rebuild",
-  );
+  console.error(HELP);
   process.exitCode = 2;
 }
 
@@ -33,16 +45,32 @@ process.stdout.on("error", (error: NodeJS.ErrnoException) => {
 });
 
 function main(argv: string[]): void {
+  const [command, ...rest] = argv;
+  if (!command) return usage();
+  if (command === "--help" || command === "-h" || command === "help") {
+    console.log(HELP);
+    return;
+  }
   const repoRoot = git(["rev-parse", "--show-toplevel"]);
   if (!repoRoot) {
     console.error("sessions: not inside a git repository");
     process.exitCode = 1;
     return;
   }
-  const [command, ...rest] = argv;
   if (command === "show") {
     const raw = rest.includes("--raw");
-    const rev = rest.find((arg) => arg !== "--raw");
+    const sessionFlagIndex = rest.indexOf("--session");
+    let sessionFilter: string | undefined;
+    if (sessionFlagIndex !== -1) {
+      sessionFilter = rest[sessionFlagIndex + 1];
+      if (!sessionFilter || sessionFilter.startsWith("-")) return usage();
+    }
+    const rev = rest.find(
+      (arg, idx) =>
+        arg !== "--raw" &&
+        arg !== "--session" &&
+        (sessionFlagIndex === -1 || idx !== sessionFlagIndex + 1),
+    );
     if (!rev) return usage();
     const commit = git(["-C", repoRoot, "rev-parse", "--verify", `${rev}^{commit}`]);
     if (!commit) {
@@ -50,13 +78,29 @@ function main(argv: string[]): void {
       process.exitCode = 1;
       return;
     }
-    const snapshot = snapshotForCommit(repoRoot, commit);
-    if (!snapshot) {
+    const pairs = snapshotsForCommit(repoRoot, commit);
+    if (pairs.length === 0) {
       console.error(`sessions: ${commit} has no Transcript trailer`);
       process.exitCode = 1;
       return;
     }
-    process.stdout.write(renderSnapshot(repoRoot, snapshot, raw ? "raw" : "markdown"));
+    const selected = sessionFilter ? pairs.filter((pair) => pair.session === sessionFilter) : pairs;
+    if (selected.length === 0) {
+      console.error(`sessions: ${commit} has no Transcript trailer for session ${sessionFilter}`);
+      process.exitCode = 1;
+      return;
+    }
+    const format = raw ? "raw" : "markdown";
+    if (selected.length === 1) {
+      process.stdout.write(renderSnapshot(repoRoot, selected[0]!.snapshot!, format));
+      return;
+    }
+    const rendered = selected.map((pair) => {
+      const body = renderSnapshot(repoRoot, pair.snapshot!, format);
+      if (raw) return body;
+      return `## Session ${pair.session} (snapshot ${pair.snapshot!.slice(0, 12)})\n\n${body}`;
+    });
+    process.stdout.write(rendered.join(raw ? "" : "\n"));
     return;
   }
   if (command === "commits") {
@@ -74,20 +118,23 @@ function main(argv: string[]): void {
     return;
   }
   if (command === "list") {
+    const full = rest.includes("--full");
     const sessions = listSessions(repoRoot);
     if (sessions.length === 0) {
       console.log("no sessions recorded");
       return;
     }
     for (const s of sessions) {
-      console.log(`${s.session_id}  snapshot ${s.latest_snapshot.slice(0, 12)}  ${s.created_at}`);
+      const snap = full ? s.latest_snapshot : s.latest_snapshot.slice(0, 12);
+      console.log(`${s.session_id}  snapshot ${snap}  ${s.created_at}`);
     }
     return;
   }
   if (command === "fork") {
-    const at = rest[rest.indexOf("--at") + 1];
+    const atIndex = rest.indexOf("--at");
+    const at = atIndex === -1 ? undefined : rest[atIndex + 1];
     const session = rest[0];
-    if (!session || rest.indexOf("--at") === -1 || !at) return usage();
+    if (!session || atIndex === -1 || !at) return usage();
     const result = forkSession(repoRoot, session, at);
     console.log(`forked session ${result.session_id}`);
     console.log(`first snapshot ${result.snapshot}`);
@@ -119,7 +166,17 @@ function main(argv: string[]): void {
   }
   if (command === "prune") {
     const flagIndex = rest.indexOf("--older-than");
-    const flagDays = flagIndex === -1 ? undefined : Number(rest[flagIndex + 1]);
+    let flagDays: number | undefined;
+    if (flagIndex !== -1) {
+      const rawValue = rest[flagIndex + 1];
+      const parsed = Number(rawValue);
+      if (!rawValue || !Number.isFinite(parsed) || parsed <= 0) {
+        console.error("sessions: --older-than requires a positive number of days");
+        process.exitCode = 2;
+        return;
+      }
+      flagDays = parsed;
+    }
     const configFile = join(sessionLogsRoot(repoRoot), "config.json");
     const configDays = existsSync(configFile)
       ? (JSON.parse(readFileSync(configFile, "utf8")).prune?.olderThanDays as number | undefined)

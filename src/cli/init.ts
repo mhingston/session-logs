@@ -12,6 +12,16 @@ function git(args: string[]): string | undefined {
   }
 }
 
+const args = process.argv.slice(2);
+if (args.includes("--help") || args.includes("-h")) {
+  console.log(
+    "usage: init\n\n" +
+      "Installs session-logs git hooks and Claude Code hooks into the current git repository.\n" +
+      "Safe to re-run (including after moving the session-logs checkout).",
+  );
+  process.exit(0);
+}
+
 const repoRoot = git(["rev-parse", "--show-toplevel"]);
 if (!repoRoot) {
   console.error("session-logs init: not inside a git repository");
@@ -22,7 +32,7 @@ if (!repoRoot) {
   try {
     const result = installHooks({ repoRoot, toolRoot, globalHooksPath });
     console.log(`Hooks: ${result.hooksPath}`);
-    console.log(`Stop hook registered in: ${result.settingsFile}`);
+    console.log(`Claude Code hooks (Stop, UserPromptSubmit) registered in: ${result.settingsFile}`);
     console.log(globalHooksPath ? `Chaining global hooks from: ${globalHooksPath}` : "No global core.hooksPath set.");
   } catch (error) {
     console.error(`session-logs init: ${error instanceof Error ? error.message : String(error)}`);

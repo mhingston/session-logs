@@ -4,9 +4,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { allActiveSessions, sessionLogsRoot, type Manifest, type SessionIndex } from "../capture/capture.ts";
+import { extractTrailers, type Pair } from "../capture/trailers.ts";
 import { sha256Hex } from "../storage/object-store.ts";
 
 const HASH = /^[0-9a-f]{64}$/;
+const HASH_PREFIX = /^[0-9a-f]{4,64}$/;
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -16,6 +18,30 @@ function assertSnapshotId(id: string): void {
   if (!HASH.test(id)) {
     throw new Error(`not a snapshot id: ${id}`);
   }
+}
+
+export function resolveSnapshotId(repoRoot: string, idOrPrefix: string): string {
+  if (!HASH_PREFIX.test(idOrPrefix)) {
+    throw new Error(`not a snapshot id: ${idOrPrefix}`);
+  }
+  if (HASH.test(idOrPrefix)) {
+    return idOrPrefix;
+  }
+  const dir = join(sessionLogsRoot(repoRoot), "snapshots");
+  if (!existsSync(dir)) {
+    throw new Error(`snapshot ${idOrPrefix} is not in the local store`);
+  }
+  const matches = readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => name.slice(0, -".json".length))
+    .filter((id) => id.startsWith(idOrPrefix));
+  if (matches.length === 0) {
+    throw new Error(`snapshot ${idOrPrefix} is not in the local store`);
+  }
+  if (matches.length > 1) {
+    throw new Error(`snapshot prefix ${idOrPrefix} is ambiguous (${matches.length} matches)`);
+  }
+  return matches[0]!;
 }
 
 export function readManifest(repoRoot: string, snapshot: string): Manifest {
@@ -114,22 +140,26 @@ export function commitsForSession(repoRoot: string, sessionId: string): CommitLi
     if (!hash || body === undefined) {
       continue;
     }
-    const trailers = body.split("\n");
-    const subject = trailers[0] ?? "";
-    if (trailers.includes(`Session: ${sessionId}`)) {
-      const snapshot = trailers.find((l) => l.startsWith("Transcript: "))?.slice("Transcript: ".length);
-      links.push({ commit: hash.trim(), subject, relation: "primary", snapshot });
-    } else if (trailers.includes(`Also-Active: ${sessionId}`)) {
+    const lines = body.split("\n");
+    const subject = lines[0] ?? "";
+    const extracted = extractTrailers(lines);
+    const pair = extracted.pairs.find((p) => p.session === sessionId);
+    if (pair) {
+      links.push({ commit: hash.trim(), subject, relation: "primary", snapshot: pair.snapshot });
+    } else if (extracted.alsoActive.includes(sessionId)) {
       links.push({ commit: hash.trim(), subject, relation: "also-active" });
     }
   }
   return links;
 }
 
-export function snapshotForCommit(repoRoot: string, rev: string): string | undefined {
+export function snapshotsForCommit(repoRoot: string, rev: string): Pair[] {
   const body = git(repoRoot, ["log", "-1", "--format=%B", rev]);
-  const line = body.split("\n").find((l) => l.startsWith("Transcript: "));
-  return line?.slice("Transcript: ".length).trim();
+  return extractTrailers(body.split("\n")).pairs.filter((pair) => Boolean(pair.snapshot));
+}
+
+export function snapshotForCommit(repoRoot: string, rev: string): string | undefined {
+  return snapshotsForCommit(repoRoot, rev)[0]?.snapshot;
 }
 
 export interface SessionSummary {

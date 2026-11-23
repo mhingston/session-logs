@@ -18,9 +18,10 @@ grep -o "[^\"' ]*src/hooks/stop.ts" .claude/settings.local.json | head -1
 The tool root is that path minus `src/hooks/stop.ts`. Set `S` to `<tool root>/src/cli/sessions.ts` and run commands from inside the repository:
 
 ```sh
-node "$S" list                    # sessions recorded in this repository
+node "$S" list                    # sessions recorded in this repository (--full for 64-char snapshot IDs)
 node "$S" commits <session-id>    # commits linked to a session
-node "$S" show <rev>              # transcript at that commit (user and assistant turns, markdown)
+node "$S" show <rev>              # transcript(s) at that commit (user and assistant turns, markdown)
+node "$S" show <rev> --session <id> # one session's transcript from a squashed commit
 node "$S" show <rev> --raw        # stored JSONL, one entry per line
 node "$S" notes show <rev>        # the session trailers for a commit
 node "$S" doctor                  # health check: hooks, store integrity, unlinked commits, missing notes

@@ -1,6 +1,7 @@
 // Claude Code Stop hook. Records the current session and snapshots its
 // transcript. Always exits 0: a capture failure must never make Claude Code
 // keep running (exit 2 on Stop would continue the conversation).
+import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { recordActiveSession, sessionLogsRoot, snapshotTranscript } from "../capture/capture.ts";
@@ -9,6 +10,17 @@ interface StopInput {
   session_id: string;
   transcript_path: string;
   cwd: string;
+}
+
+function resolveRepoRoot(cwd: string): string {
+  try {
+    return execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || cwd;
+  } catch {
+    return cwd;
+  }
 }
 
 function logError(repoRoot: string, message: string): void {
@@ -23,10 +35,12 @@ function logError(repoRoot: string, message: string): void {
 }
 
 function main(): void {
-  let repoRoot = process.cwd();
+  let repoRoot = resolveRepoRoot(process.cwd());
   try {
     const input = JSON.parse(readFileSync(0, "utf8")) as StopInput;
-    repoRoot = input.cwd;
+    if (input.cwd) {
+      repoRoot = resolveRepoRoot(input.cwd);
+    }
     if (!input.session_id || !input.transcript_path) {
       throw new Error("hook input missing session_id or transcript_path");
     }

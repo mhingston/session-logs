@@ -5,10 +5,10 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { activityAt, allActiveSessions, sessionLogsRoot, type Manifest, type SessionIndex } from "../capture/capture.ts";
 import { sha256Hex } from "../storage/object-store.ts";
-import { readSnapshotLines, readManifest, commitsForSession } from "../read/read.ts";
+import { readSnapshotLines, readManifest, commitsForSession, resolveSnapshotId } from "../read/read.ts";
 import { readNote } from "../notes/notes.ts";
 
-const HASH = /^[0-9a-f]{64}$/;
+const HASH_PREFIX = /^[0-9a-f]{4,64}$/;
 
 function git(repoRoot: string, args: string[]): string {
   return execFileSync("git", ["-C", repoRoot, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -42,17 +42,18 @@ export function forkSession(
   now: Date = new Date(),
   newSessionId: string = randomUUID(),
 ): ForkResult {
-  if (!HASH.test(atSnapshot)) {
+  if (!HASH_PREFIX.test(atSnapshot)) {
     throw new Error("--at must be a snapshot id");
   }
-  const parent = readManifest(repoRoot, atSnapshot);
+  const resolvedSnapshot = resolveSnapshotId(repoRoot, atSnapshot);
+  const parent = readManifest(repoRoot, resolvedSnapshot);
   if (parent.session_id !== parentSession) {
-    throw new Error(`snapshot ${atSnapshot} belongs to session ${parent.session_id}, not ${parentSession}`);
+    throw new Error(`snapshot ${resolvedSnapshot} belongs to session ${parent.session_id}, not ${parentSession}`);
   }
   const forked: Manifest = {
     ...parent,
     session_id: newSessionId,
-    parent: { session_id: parentSession, snapshot: atSnapshot },
+    parent: { session_id: parentSession, snapshot: resolvedSnapshot },
     created_at: now.toISOString(),
   };
   const bytes = Buffer.from(JSON.stringify(forked, null, 2) + "\n", "utf8");
@@ -63,7 +64,7 @@ export function forkSession(
   writeFileSync(join(root, "snapshots", `${snapshot}.json`), bytes);
   const index: SessionIndex = {
     session_id: newSessionId,
-    content_sha256: sha256Hex(Buffer.from(readSnapshotLines(repoRoot, atSnapshot).join("\n") + "\n", "utf8")),
+    content_sha256: sha256Hex(Buffer.from(readSnapshotLines(repoRoot, resolvedSnapshot).join("\n") + "\n", "utf8")),
     snapshot,
   };
   writeFileSync(join(root, "sessions", `${newSessionId}.json`), JSON.stringify(index, null, 2) + "\n");
@@ -94,11 +95,43 @@ export function doctor(repoRoot: string): Finding[] {
   }
   const settings = join(repoRoot, ".claude", "settings.local.json");
   const settingsText = existsSync(settings) ? readFileSync(settings, "utf8") : "";
-  if (!settingsText.includes("stop.ts")) {
+  const registeredHookPaths = (event: string, suffix: string): string[] => {
+    if (!settingsText) return [];
+    try {
+      const parsed = JSON.parse(settingsText) as {
+        hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>;
+      };
+      const commands = (parsed.hooks?.[event] ?? []).flatMap((g) => (g.hooks ?? []).map((h) => h.command ?? ""));
+      const paths: string[] = [];
+      for (const cmd of commands) {
+        const match = cmd.match(/^node\s+(['"]?)(.+?)\1$/);
+        if (match?.[2]?.endsWith(suffix)) {
+          paths.push(match[2].replace(/'\\''/g, "'"));
+        }
+      }
+      return paths;
+    } catch {
+      return [];
+    }
+  };
+
+  const stopPaths = registeredHookPaths("Stop", "src/hooks/stop.ts");
+  if (stopPaths.length === 0) {
     findings.push({ level: "warn", message: "Stop hook is not registered in .claude/settings.local.json (run init)" });
+  } else if (stopPaths.some((p) => !existsSync(p))) {
+    findings.push({
+      level: "warn",
+      message: "Stop hook in .claude/settings.local.json points to a missing script; re-run init",
+    });
   }
-  if (!settingsText.includes("user-prompt-submit.ts")) {
+  const promptPaths = registeredHookPaths("UserPromptSubmit", "src/hooks/user-prompt-submit.ts");
+  if (promptPaths.length === 0) {
     findings.push({ level: "warn", message: "UserPromptSubmit hook is not registered; commits made mid-turn will not link (run init)" });
+  } else if (promptPaths.some((p) => !existsSync(p))) {
+    findings.push({
+      level: "warn",
+      message: "UserPromptSubmit hook in .claude/settings.local.json points to a missing script; re-run init",
+    });
   }
   if (existsSync(join(root, "errors.log"))) {
     const count = readFileSync(join(root, "errors.log"), "utf8").split("\n").filter(Boolean).length;

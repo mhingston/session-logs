@@ -6,62 +6,85 @@ Record Claude Code session transcripts and link every git commit to the session 
 
 ## Quick start
 
-You need Node.js 23.6 or later (`node -v`), git, and Claude Code.
+**Prerequisites:** Node.js 23.6 or later (`node -v`), `git`, and Claude Code.
+
+### 1. Clone and verify (once)
 
 ```sh
-# 1. Install and check this tool (once)
-cd /path/to/session-logs
+git clone https://github.com/mhingston/session-logs
+cd session-logs
 npm install
-npm run check          # type-check and tests; should report 77 passing
-
-# 2. Turn it on in a repository (once per repository, per clone)
-cd /path/to/your-repo
-node /path/to/session-logs/src/cli/init.ts
-
-# 3. Work as normal: use Claude Code, then commit
-claude                 # ...work in a session...
-git commit -am "Your change"
-
-# 4. Read it back
-node /path/to/session-logs/src/cli/sessions.ts list
-node /path/to/session-logs/src/cli/sessions.ts show HEAD
+npm run check          # type-check and test suite
 ```
 
-After step 2, a commit made in a session ends with two trailers:
+Optional — add shell aliases (e.g. in `~/.zshrc` or `~/.bashrc`) so you don't have to type the full path:
+
+```sh
+alias sessions-init='node /path/to/session-logs/src/cli/init.ts'
+alias sessions='node /path/to/session-logs/src/cli/sessions.ts'
+```
+
+### 2. Enable in a repository (once per clone)
+
+```sh
+cd /path/to/your-repo
+node /path/to/session-logs/src/cli/init.ts
+node /path/to/session-logs/src/cli/sessions.ts doctor
+```
+
+`doctor` should report no warnings (`info  no unlinked commits found during recorded sessions`).
+
+### 3. Work as normal
+
+```sh
+claude                 # work in a session (from the repo root or any subdirectory)
+git commit -am "Your change"
+```
+
+Every commit made during or after a session gets two trailers automatically:
 
 ```
 Session: 2c087fae-f67a-4647-8eb6-e790c1e31844
 Transcript: a53e7356f3e25c3e299a87cf142a603eff5d3c99c3fa3b619ed0aadf1fcb3713
 ```
 
-`Transcript:` is the snapshot ID. It identifies the transcript as it was at commit time.
+`Transcript:` is the snapshot ID — it points to the transcript as it was at commit time, even if the session continues later.
 
-If `show` finds nothing, run `doctor` (below) first.
+### 4. Read it back
+
+```sh
+node /path/to/session-logs/src/cli/sessions.ts list
+node /path/to/session-logs/src/cli/sessions.ts show HEAD
+```
+
+If `show` finds nothing, run `doctor` first.
 
 ## What it does
 
-- **Captures** each session's conversation at every turn end (Claude Code `Stop` hook) and stores it in `.session-logs/` inside the repository. The folder is gitignored, so transcripts never enter git history.
+- **Captures** each session's conversation at every turn end (Claude Code `Stop` hook) and stores it in `.session-logs/` at the repository root (even if Claude Code was launched from a subdirectory). The folder is gitignored, so transcripts never enter git history.
 - **Links** each commit to the session that produced it, with `Session:` and `Transcript:` trailers, through a git hook. The link survives amend, squash, cherry-pick, revert and rebase.
-- **Reads** a commit's transcript as it was when the commit was made, even after the session continued.
+- **Reads** a commit's transcript as it was when the commit was made, even after the session continued. On squashed commits that combine multiple sessions, `show` renders every linked transcript (or pass `--session <id>` to filter to one).
 - **Redacts** common secret formats (private keys, cloud and API keys, bearer tokens, connection strings) before anything is written. This is best effort. Do not rely on it as the only control.
 - **Keeps your git hooks working.** Your global hooks (for example Husky or Repowise) still run first.
 - **Links commits made mid-turn.** A commit made while Claude is working links to that session, however many commits it makes in that turn. A turn left open for more than 2 hours (for example after an interrupt) no longer claims commits.
 
 ## Commands
 
-Run these from inside the repository. Replace the path with wherever you cloned this tool.
+Run these from anywhere inside the repository. Replace the path with wherever you cloned this tool (or use the `sessions` alias from Quick start). Run `sessions --help` at any time for a summary.
 
 ```sh
 S=/path/to/session-logs/src/cli/sessions.ts
 
-node $S list                             # sessions recorded in this repository
+node $S list                             # sessions recorded in this repository (12-char snapshot IDs)
+node $S list --full                      # sessions with full 64-char snapshot IDs
 node $S commits <session-id>             # commits linked to a session
-node $S show <rev>                       # transcript as it was at that commit (conversation turns only)
+node $S show <rev>                       # transcript(s) as of that commit (conversation turns only)
+node $S show <rev> --session <id>        # one session's transcript from a squashed commit
 node $S show <rev> --raw                 # stored JSONL, one entry per line
 node $S doctor                           # health check: hooks, store integrity, unlinked commits, missing notes
 node $S notes show <rev>                 # the git note for a commit (its session trailers)
 node $S notes rebuild                    # rebuild every note from trailers
-node $S fork <session> --at <snapshot>   # new session record starting from an earlier snapshot
+node $S fork <session> --at <snapshot>   # new session record from a snapshot (full ID or unique prefix from list)
 node $S prune --older-than 30            # dry run: which old, unlinked sessions would be removed
 node $S prune --older-than 30 --apply    # delete them
 ```
@@ -110,7 +133,7 @@ mkdir -p ~/.claude/skills && ln -s /path/to/session-logs/skills/session-logs ~/.
 
 It refuses to replace a `core.hooksPath` it did not set (for example Husky's), so it cannot silently disable other tools. It is safe to re-run.
 
-**If you move this checkout, re-run `init` in each repository.** The hooks and settings contain its absolute path.
+**If you move this checkout, re-run `init` in each repository.** The hooks and settings contain its absolute path; re-running `init` replaces stale paths cleanly, and `doctor` warns if any registered hook points to a missing script.
 
 ## Troubleshooting
 

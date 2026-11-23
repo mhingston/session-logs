@@ -107,6 +107,11 @@ function ensureLine(path: string, line: string): void {
   }
 }
 
+function isOurHookCommand(command: string, script: string): boolean {
+  const escaped = script.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^node\\s+['"]?.*${escaped}['"]?$`).test(command.trim());
+}
+
 function registerHook(settingsFile: string, toolRoot: string, event: string, script: string): void {
   mkdirSync(dirname(settingsFile), { recursive: true });
   const settings = existsSync(settingsFile)
@@ -114,7 +119,14 @@ function registerHook(settingsFile: string, toolRoot: string, event: string, scr
     : {};
   const hooks = (settings.hooks ?? {}) as Record<string, Array<{ hooks: Array<{ type: string; command: string }> }>>;
   const command = `node ${sh(join(toolRoot, script))}`;
-  const groups = hooks[event] ?? [];
+  // Drop stale session-logs entries for this script (e.g. after moving the checkout)
+  // while leaving unrelated hooks untouched.
+  const groups = (hooks[event] ?? [])
+    .map((group) => ({
+      ...group,
+      hooks: group.hooks.filter((hook) => hook.command === command || !isOurHookCommand(hook.command, script)),
+    }))
+    .filter((group) => group.hooks.length > 0);
   const already = groups.some((group) => group.hooks.some((hook) => hook.command === command));
   if (!already) {
     groups.push({ hooks: [{ type: "command", command }] });

@@ -12,6 +12,7 @@ import {
   readManifest,
   renderSnapshot,
   snapshotForCommit,
+  snapshotsForCommit,
 } from "../src/read/read.ts";
 
 const TOOL_ROOT = resolve(new URL(".", import.meta.url).pathname, "..");
@@ -150,5 +151,41 @@ test("rendered output never contains a secret from the transcript", () => {
 test("snapshot ids are validated before any filesystem access", () => {
   const repo = setupRepo();
   assert.throws(() => readManifest(repo, "../../etc/passwd"), /not a snapshot id/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("commitsForSession and snapshotsForCommit pair each session with its own transcript on a squashed commit", () => {
+  const repo = setupRepo();
+  const t1 = join(repo, "s1.jsonl");
+  const t2 = join(repo, "s2.jsonl");
+  writeFileSync(t1, userLine("session one work"));
+  writeFileSync(t2, userLine("session two work"));
+  stop(repo, "sq-1", t1);
+  commitFile(repo, "a.txt", "First");
+  const snap1 = snapshotForCommit(repo, "HEAD");
+  assert.ok(snap1);
+
+  stop(repo, "sq-2", t2);
+  commitFile(repo, "b.txt", "Second");
+  const snap2 = snapshotForCommit(repo, "HEAD");
+  assert.ok(snap2);
+  assert.notEqual(snap1, snap2);
+
+  // Squash both commits into one.
+  execFileSync("git", ["-C", repo, "rebase", "-q", "-i", "--root"], {
+    env: { ...process.env, GIT_SEQUENCE_EDITOR: "sed -i.bak '2s/^pick/squash/'", GIT_EDITOR: "true" },
+    stdio: "ignore",
+  });
+
+  const pairs = snapshotsForCommit(repo, "HEAD");
+  assert.deepEqual(
+    pairs.map((p) => [p.session, p.snapshot]),
+    [
+      ["sq-1", snap1],
+      ["sq-2", snap2],
+    ],
+  );
+  assert.equal(commitsForSession(repo, "sq-1")[0]?.snapshot, snap1);
+  assert.equal(commitsForSession(repo, "sq-2")[0]?.snapshot, snap2);
   rmSync(repo, { recursive: true, force: true });
 });

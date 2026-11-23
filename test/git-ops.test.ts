@@ -83,7 +83,13 @@ test("squash keeps every session pair and does not link a new session", () => {
   commit(repo, "two.txt", "Commit two", "10:40");
 
   // Squash commit two into commit one, replaying both with the hooks active.
-  const env = { ...process.env, GIT_SEQUENCE_EDITOR: "sed -i.bak '2s/^pick/squash/'", GIT_COMMITTER_DATE: iso("10:50"), GIT_AUTHOR_DATE: iso("10:50") };
+  const env = {
+    ...process.env,
+    GIT_SEQUENCE_EDITOR: "sed -i.bak '2s/^pick/squash/'",
+    GIT_EDITOR: "true",
+    GIT_COMMITTER_DATE: iso("10:50"),
+    GIT_AUTHOR_DATE: iso("10:50"),
+  };
   execFileSync("git", ["-C", repo, "rebase", "-q", "-i", "HEAD~2"], { env, stdio: "ignore" });
 
   const sessions = trailerLines(repo).filter((l) => l.startsWith("Session: "));

@@ -74,6 +74,25 @@ test("fork rejects a snapshot that belongs to a different session", () => {
   rmSync(repo, { recursive: true, force: true });
 });
 
+test("fork accepts a unique snapshot prefix", () => {
+  const repo = setupRepo();
+  const t = transcript(repo, "p", ["prefix fork"]);
+  const snapshot = snapshotTranscript(repo, "prefix-parent", t, at("10:00"));
+  const fork = forkSession(repo, "prefix-parent", snapshot.slice(0, 12), at("10:05"), "prefix-child");
+  const forked = readManifest(repo, fork.snapshot);
+  assert.deepEqual(forked.parent, { session_id: "prefix-parent", snapshot });
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("doctor warns when registered Claude Code hook scripts are missing on disk", () => {
+  const repo = setupRepo(false);
+  installHooks({ repoRoot: repo, toolRoot: "/nonexistent/moved/session-logs" });
+  const findings = doctor(repo);
+  assert.ok(findings.some((f) => f.level === "warn" && /Stop hook.*missing script/.test(f.message)));
+  assert.ok(findings.some((f) => f.level === "warn" && /UserPromptSubmit hook.*missing script/.test(f.message)));
+  rmSync(repo, { recursive: true, force: true });
+});
+
 test("doctor warns when hooks are not installed", () => {
   const repo = setupRepo(false);
   const findings = doctor(repo);

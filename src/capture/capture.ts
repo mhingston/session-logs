@@ -231,7 +231,9 @@ export function findForkParent(
     if (!manifest || manifest.session_id === sessionId) continue;
     const shared = new Set<string>();
     for (const segment of manifest.segments) {
-      for (const line of readFileSync(join(root, "objects", segment.sha256), "utf8").split("\n")) {
+      const objectPath = join(root, "objects", segment.sha256);
+      if (!existsSync(objectPath)) continue;
+      for (const line of readFileSync(objectPath, "utf8").split("\n")) {
         try {
           const uuid = (JSON.parse(line) as { uuid?: unknown }).uuid;
           if (typeof uuid === "string" && mine.has(uuid)) shared.add(uuid);

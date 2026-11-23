@@ -15,6 +15,7 @@ import {
 
 const here = new URL(".", import.meta.url).pathname;
 const stopHook = join(here, "../src/hooks/stop.ts");
+const promptHook = join(here, "../src/hooks/user-prompt-submit.ts");
 const prepareHook = join(here, "../src/hooks/prepare-commit-msg.ts");
 
 function tempRepo(): string {
@@ -185,4 +186,42 @@ test("non-conversation entries are not stored and are counted in the manifest (D
   const stored = manifest.segments.map((seg: { sha256: string }) => readFileSync(join(root, "objects", seg.sha256), "utf8")).join("");
   assert.ok(!stored.includes("injected policy text"));
   assert.ok(stored.includes("real question") && stored.includes("real answer"));
+});
+
+test("stop and user-prompt-submit hooks write to the git repo root when cwd is a subdirectory", () => {
+  const repo = tempRepo();
+  const subdir = join(repo, "packages", "app");
+  mkdirSync(subdir, { recursive: true });
+  const transcript = join(repo, "t.jsonl");
+  writeFileSync(transcript, transcriptLines(2).join("\n") + "\n");
+
+  const promptResult = spawnSync(process.execPath, [promptHook], {
+    input: JSON.stringify({ session_id: "sub-s1", transcript_path: transcript, cwd: subdir }),
+    encoding: "utf8",
+  });
+  assert.equal(promptResult.status, 0);
+  const stopResult = spawnSync(process.execPath, [stopHook], {
+    input: JSON.stringify({ session_id: "sub-s1", transcript_path: transcript, cwd: subdir }),
+    encoding: "utf8",
+  });
+  assert.equal(stopResult.status, 0);
+
+  assert.ok(existsSync(join(sessionLogsRoot(repo), "active", "sub-s1.json")));
+  assert.ok(existsSync(join(sessionLogsRoot(repo), "sessions", "sub-s1.json")));
+  assert.ok(!existsSync(join(subdir, ".session-logs")));
+});
+
+test("snapshotting a new session ignores unrelated snapshots whose segment objects are missing", () => {
+  const repo = tempRepo();
+  const t1 = join(repo, "t1.jsonl");
+  const t2 = join(repo, "t2.jsonl");
+  writeFileSync(t1, transcriptLines(2, "a").join("\n") + "\n");
+  writeFileSync(t2, transcriptLines(2, "b").join("\n") + "\n");
+  const first = snapshotTranscript(repo, "s-broken", t1);
+  const manifest = JSON.parse(readFileSync(join(sessionLogsRoot(repo), "snapshots", `${first}.json`), "utf8"));
+  // Simulate a missing object file for an unrelated snapshot.
+  execFileSync("rm", ["-f", join(sessionLogsRoot(repo), "objects", manifest.segments[0].sha256)]);
+
+  const second = snapshotTranscript(repo, "s-healthy", t2);
+  assert.ok(existsSync(join(sessionLogsRoot(repo), "snapshots", `${second}.json`)));
 });
