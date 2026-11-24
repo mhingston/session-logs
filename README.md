@@ -167,7 +167,7 @@ mkdir -p ~/.claude/skills && ln -s /path/to/session-logs/skills/session-logs ~/.
 | Summaries (opt-in) | `.session-logs/summaries/<snapshot>.json` | Gitignored. Local only. Created only when `summaries.enabled` is true. |
 | Opt-in settings | `.session-logs/config.json` | `{ "decisions": { "enabled": true }, "summaries": { "enabled": true } }`. Also holds `prune.olderThanDays`. |
 | Hook errors | `.session-logs/errors.log` | Error text only; never transcript content. |
-| Decisions and findings | `docs/DECISIONS.md`, `docs/M0-findings.md` | |
+| Decisions | `docs/DECISIONS.md` | |
 
 ## Installation details
 
@@ -217,7 +217,7 @@ Before connecting it, read these access notes:
 
 ## Design
 
-The decision log is [`docs/DECISIONS.md`](docs/DECISIONS.md). The spike findings, including the live Claude Code checks, are in [`docs/M0-findings.md`](docs/M0-findings.md).
+The decision log is [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
 ## Verifying against real Claude Code
 
@@ -228,7 +228,7 @@ cd /path/to/session-logs
 scripts/live-check.sh
 ```
 
-It creates a throwaway repository, runs a session and a fork, and prints the hook payload fields and the fork's `SessionStart` source. The results from the last run are in `docs/M0-findings.md`.
+It creates a throwaway repository, runs a session and a fork, and prints the hook payload fields and the fork's `SessionStart` source.
 
 ## Development
 
@@ -255,7 +255,7 @@ src/remote/            push and fetch (not connected)
 src/storage/           object store interface and Azure Blob adapter (not connected)
 scripts/live-check.sh  live Claude Code checks (run in your terminal; needs API access)
 test/                  node:test suites
-docs/                  decisions and findings
+docs/                  decision log
 ```
 
 Claude Code is the only supported agent. Agent-specific code lives in `src/hooks/` and `src/install/`, so another agent would need its own hook adapter.
