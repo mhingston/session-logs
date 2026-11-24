@@ -4,6 +4,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { sessionLogsRoot } from "../capture/capture.ts";
+import { pushIfLinked } from "../remote/remote.ts";
 import { generateSummary, SummaryBusyError } from "./summaries.ts";
 
 function logError(repoRoot: string, message: string): void {
@@ -16,7 +17,7 @@ function logError(repoRoot: string, message: string): void {
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const [repoRoot, snapshot] = process.argv.slice(2);
   if (!repoRoot || !snapshot) {
     process.exitCode = 2;
@@ -28,7 +29,15 @@ function main(): void {
     // Another caller is already generating this summary; nothing to report.
     if (error instanceof SummaryBusyError) return;
     logError(repoRoot, error instanceof Error ? error.message : String(error));
+    return;
+  }
+  try {
+    await pushIfLinked(repoRoot, snapshot);
+  } catch (error) {
+    logError(repoRoot, `remote: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-main();
+main().catch(() => {
+  process.exitCode = 0;
+});

@@ -1,7 +1,7 @@
-// Push and fetch of snapshots between the local store and any ObjectStore
-// (D18, D19, D24). Library only: nothing here is wired to a CLI command yet.
+// Push and fetch of snapshots, with their summaries and decision extracts, between the
+// local store and any ObjectStore (D18, D19, D24). Used by the CLI and post-commit hook.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { sessionLogsRoot, type Manifest } from "../capture/capture.ts";
 import { sha256Hex, type ObjectStore } from "../storage/object-store.ts";
 
@@ -59,39 +59,62 @@ export async function pushSnapshots(repoRoot: string, store: ObjectStore, option
     if (!(await store.has(snapshot))) {
       await store.put(snapshot, manifestBytes);
     }
+    // Derived records follow the snapshot's redaction gate above. They are written
+    // after the snapshot exists, so they are pushed again when created later.
+    for (const name of derivedNames(snapshot)) {
+      if (existsSync(join(root, name))) {
+        await store.putNamed(name, readFileSync(join(root, name)));
+      }
+    }
     report.pushed.push(snapshot);
   }
   return report;
 }
 
+function derivedNames(snapshot: string): string[] {
+  return [`summaries/${snapshot}.json`, `decisions/${snapshot}.json`];
+}
+
 // Brings one snapshot into the local store. Local objects that already exist
-// are not re-fetched. Every fetched object is verified by the store.
+// are not re-fetched. Every fetched object is verified by the store. Derived
+// records (summaries, decisions) are fetched when the remote has them.
 export async function fetchSnapshot(repoRoot: string, store: ObjectStore, snapshot: string): Promise<void> {
   assertId(snapshot);
   const root = sessionLogsRoot(repoRoot);
   const manifestPath = join(root, "snapshots", `${snapshot}.json`);
-  if (existsSync(manifestPath)) {
-    return;
+  if (!existsSync(manifestPath)) {
+    const manifestBytes = await store.get(snapshot);
+    if (!manifestBytes) {
+      throw new Error(`snapshot ${snapshot} is not in the remote store`);
+    }
+    const manifest = JSON.parse(Buffer.from(manifestBytes).toString("utf8")) as Manifest;
+    mkdirSync(join(root, "objects"), { recursive: true });
+    for (const segment of manifest.segments) {
+      assertId(segment.sha256);
+      const target = join(root, "objects", segment.sha256);
+      if (existsSync(target)) continue;
+      const bytes = await store.get(segment.sha256);
+      if (!bytes) {
+        throw new Error(`segment ${segment.sha256} for ${snapshot} is missing from the remote store`);
+      }
+      if (sha256Hex(bytes) !== segment.sha256) {
+        throw new Error(`segment ${segment.sha256} failed its integrity check`);
+      }
+      writeFileSync(target, bytes);
+    }
+    mkdirSync(join(root, "snapshots"), { recursive: true });
+    writeFileSync(manifestPath, Buffer.from(manifestBytes));
   }
-  const manifestBytes = await store.get(snapshot);
-  if (!manifestBytes) {
-    throw new Error(`snapshot ${snapshot} is not in the remote store`);
-  }
-  const manifest = JSON.parse(Buffer.from(manifestBytes).toString("utf8")) as Manifest;
-  mkdirSync(join(root, "objects"), { recursive: true });
-  for (const segment of manifest.segments) {
-    assertId(segment.sha256);
-    const target = join(root, "objects", segment.sha256);
+  for (const name of derivedNames(snapshot)) {
+    const target = join(root, name);
     if (existsSync(target)) continue;
-    const bytes = await store.get(segment.sha256);
-    if (!bytes) {
-      throw new Error(`segment ${segment.sha256} for ${snapshot} is missing from the remote store`);
+    const bytes = await store.getNamed(name);
+    if (!bytes) continue;
+    const record = JSON.parse(Buffer.from(bytes).toString("utf8")) as { snapshot?: unknown };
+    if (record.snapshot !== snapshot) {
+      throw new Error(`remote ${name} does not name snapshot ${snapshot}`);
     }
-    if (sha256Hex(bytes) !== segment.sha256) {
-      throw new Error(`segment ${segment.sha256} failed its integrity check`);
-    }
+    mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, bytes);
   }
-  mkdirSync(join(root, "snapshots"), { recursive: true });
-  writeFileSync(manifestPath, Buffer.from(manifestBytes));
 }

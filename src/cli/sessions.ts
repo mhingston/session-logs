@@ -10,6 +10,7 @@ import { sessionLogsRoot } from "../capture/capture.ts";
 import { doctor, forkSession, pruneSessions } from "../maintain/maintain.ts";
 import { decisionsEnabled, generateDecisions } from "../decisions/decisions.ts";
 import { generateSummary, summariesEnabled } from "../summaries/summaries.ts";
+import { fetchCommit, pushCommit } from "../remote/remote.ts";
 import { readNote, rebuildNotes } from "../notes/notes.ts";
 
 function git(args: string[]): string | undefined {
@@ -31,6 +32,8 @@ const HELP = [
   "  summary <rev> [--session <id>] [--json]     LLM summary of a commit's transcript (opt-in, P1; generates if missing)",
   "  notes show <rev>                            Show the git note for a commit",
   "  notes rebuild                               Rebuild all git notes from commit trailers",
+  "  remote push [<rev>] [--allow-redacted]      Push a commit's linked snapshots and summaries (needs remote in config)",
+  "  remote fetch [<rev>]                        Fetch a commit's linked snapshots from the remote",
   "  fork <session-id> --at <snapshot>           Create a new session record from a snapshot (ID or unique prefix)",
   "  doctor                                      Check hooks, store integrity, unlinked commits, and notes",
   "  prune [--older-than <days>] [--include-linked] [--apply]",
@@ -48,7 +51,7 @@ process.stdout.on("error", (error: NodeJS.ErrnoException) => {
   throw error;
 });
 
-function main(argv: string[]): void {
+async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
   if (!command) return usage();
   if (command === "--help" || command === "-h" || command === "help") {
@@ -236,6 +239,35 @@ function main(argv: string[]): void {
     }
     return usage();
   }
+  if (command === "remote") {
+    const sub = rest[0];
+    const rev = rest[1] ?? "HEAD";
+    try {
+      if (sub === "push") {
+        const report = await pushCommit(repoRoot, rev, rest.includes("--allow-redacted"));
+        if (!report) {
+          console.error("sessions: remote storage is not enabled in .session-logs/config.json");
+          process.exitCode = 1;
+          return;
+        }
+        for (const snapshot of report.pushed) console.log(`pushed ${snapshot.slice(0, 12)}`);
+        for (const skip of report.skipped) console.log(`skipped ${skip.snapshot.slice(0, 12)}: ${skip.reason}`);
+        if (report.pushed.length === 0 && report.skipped.length === 0) console.log("no snapshots linked to this commit");
+        return;
+      }
+      if (sub === "fetch") {
+        const snapshots = await fetchCommit(repoRoot, rev);
+        for (const snapshot of snapshots) console.log(`fetched ${snapshot.slice(0, 12)}`);
+        if (snapshots.length === 0) console.log("no snapshots linked to this commit");
+        return;
+      }
+    } catch (error) {
+      console.error(`sessions: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+      return;
+    }
+    return usage();
+  }
   if (command === "doctor") {
     for (const finding of doctor(repoRoot)) {
       console.log(`${finding.level.padEnd(5)} ${finding.message}`);
@@ -272,9 +304,7 @@ function main(argv: string[]): void {
   usage();
 }
 
-try {
-  main(process.argv.slice(2));
-} catch (error) {
+main(process.argv.slice(2)).catch((error: unknown) => {
   console.error(`sessions: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
-}
+});

@@ -89,3 +89,15 @@ test("rejects malformed hashes before touching the container", async () => {
   await assert.rejects(store.get("../../etc/passwd"), /64 lowercase hex/);
   assert.equal(touched, false);
 });
+
+test("named summary and decision objects are immutable and reject other names", async () => {
+  const { container, blobs, handles } = fakeContainer();
+  const store = new AzureBlobStore({ container, prefix: "objects/" });
+  const name = `summaries/${hash}.json`;
+  await store.putNamed(name, payload);
+  await store.putNamed(name, new TextEncoder().encode("replaced"));
+  assert.equal(handles.get(`objects/${name}`)?.uploads, 1);
+  assert.deepEqual(blobs.get(`objects/${name}`), payload);
+  assert.deepEqual(await store.getNamed(name), payload);
+  await assert.rejects(store.putNamed("../escape.json", payload), /named object must be/);
+});

@@ -7,6 +7,7 @@ import { sessionLogsRoot } from "./capture.ts";
 interface ConfigFile {
   decisions?: { enabled?: unknown };
   summaries?: { enabled?: unknown };
+  remote?: { enabled?: unknown; provider?: unknown; accountUrl?: unknown; container?: unknown; prefix?: unknown };
 }
 
 export function readConfig(repoRoot: string): ConfigFile {

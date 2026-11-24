@@ -1,4 +1,4 @@
-import { assertHash, sha256Hex, type ObjectStore } from "./object-store.ts";
+import { assertHash, assertName, sha256Hex, type ObjectStore } from "./object-store.ts";
 
 // Minimal surface of an Azure Blob container client. The real
 // @azure/storage-blob client satisfies this; tests use an in-memory fake.
@@ -61,5 +61,22 @@ export class AzureBlobStore implements ObjectStore {
       throw new Error(`stored object ${hash} failed integrity check`);
     }
     return bytes;
+  }
+
+  private blobForName(name: string): BlobLike {
+    assertName(name);
+    return this.container.blob(`${this.prefix}${name}`);
+  }
+
+  async putNamed(name: string, bytes: Uint8Array): Promise<void> {
+    const blob = this.blobForName(name);
+    if (await blob.exists()) {
+      return;
+    }
+    await blob.upload(bytes);
+  }
+
+  async getNamed(name: string): Promise<Uint8Array | undefined> {
+    return this.blobForName(name).download();
   }
 }

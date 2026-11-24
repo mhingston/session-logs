@@ -2,7 +2,7 @@
 
 Record Claude Code session transcripts and link every git commit to the session that produced it.
 
-> **Status: early, public.** Transcript capture, commit linking (including commits made mid-turn), git notes, reading, forks, `doctor` and `prune` work on one machine. Deterministic decision extracts are an opt-in MVP, and opt-in LLM summaries (P1) run in the background through Claude Code (see [Decision extracts](#decision-extracts) and [Summaries](#summaries-p1)). Remote sync is library code only and is not connected to any command. See [What is not done](#what-is-not-done).
+> **Status: early, public.** Transcript capture, commit linking (including commits made mid-turn), git notes, reading, forks, `doctor` and `prune` work on one machine. Deterministic decision extracts are an opt-in MVP, and opt-in LLM summaries (P1) run in the background through Claude Code (see [Decision extracts](#decision-extracts) and [Summaries](#summaries-p1)). Remote storage is opt-in and connected to commits and fetch. See [Remote storage](#remote-storage). Only the snapshot IDs a commit links are pushed, and only with an explicit remote config.
 
 ## Quick start
 
@@ -91,6 +91,8 @@ node $S summary <rev>                    # LLM summary of a commit's transcript 
 node $S fork <session> --at <snapshot>   # new session record from a snapshot (full ID or unique prefix from list)
 node $S prune --older-than 30            # dry run: which old, unlinked sessions would be removed
 node $S prune --older-than 30 --apply    # delete them
+node $S remote push <rev>                # push a commit's linked snapshots and summaries (needs remote config)
+node $S remote fetch <rev>               # fetch a commit's linked snapshots from the remote
 ```
 
 Pruning is **off** unless you pass `--older-than` or set `prune.olderThanDays` in `.session-logs/config.json`. It removes whole sessions only, and never linked ones unless you pass `--include-linked`. Pruning a linked session makes `show` fail for those commits.
@@ -165,7 +167,7 @@ mkdir -p ~/.claude/skills && ln -s /path/to/session-logs/skills/session-logs ~/.
 | Git notes (session links per commit) | `.session-logs/notes.git` | A bare repository, read through git alternates. Rebuildable from trailers. Nothing is written to the main repository's refs. |
 | Decision extracts (opt-in) | `.session-logs/decisions/<snapshot>.json` | Gitignored. Local only. Created only when `decisions.enabled` is true. |
 | Summaries (opt-in) | `.session-logs/summaries/<snapshot>.json` | Gitignored. Local only. Created only when `summaries.enabled` is true. |
-| Opt-in settings | `.session-logs/config.json` | `{ "decisions": { "enabled": true }, "summaries": { "enabled": true } }`. Also holds `prune.olderThanDays`. |
+| Opt-in settings | `.session-logs/config.json` | `{ "decisions": { "enabled": true }, "summaries": { "enabled": true }, "remote": { ... } }`. Also holds `prune.olderThanDays`. The `remote` block is described in [Remote storage](#remote-storage). |
 | Hook errors | `.session-logs/errors.log` | Error text only; never transcript content. |
 | Decisions | `docs/DECISIONS.md` | |
 
@@ -175,7 +177,7 @@ mkdir -p ~/.claude/skills && ln -s /path/to/session-logs/skills/session-logs ~/.
 
 1. Points `core.hooksPath` at `.session-logs/git-hooks`. Each git hook shim runs your global hook of the same name first, then session-logs:
    - `prepare-commit-msg` adds the session trailers, and also runs the repository's own `.git/hooks` script.
-   - `post-commit` and `post-rewrite` refresh the git notes.
+   - `post-commit` and `post-rewrite` refresh the git notes. `post-commit` also pushes the linked snapshots when remote storage is enabled.
    - `pre-commit` and `commit-msg` only chain to your existing hooks.
 2. Registers two Claude Code hooks in `.claude/settings.local.json`: `UserPromptSubmit` (marks a turn open, so commits made mid-turn link to it) and `Stop` (snapshots the transcript).
 3. Adds `.session-logs/` and `.claude/settings.local.json` to `.gitignore`.
@@ -195,21 +197,31 @@ It refuses to replace a `core.hooksPath` it did not set (for example Husky's), s
 - **Commits made mid-turn have no link.** Re-run `init`. It registers the `UserPromptSubmit` hook, which older installs lack.
 - **Hooks stopped working after moving the checkout.** Re-run `init`.
 
-## Remote sync (library only)
+## Remote storage
 
-Remote push and fetch are implemented as library functions (`src/remote/sync.ts`) and tested against an in-memory object store. The Azure Blob adapter exists separately. Neither a CLI command nor an Azure container is wired up; CLI/container integration is deferred by owner decision, so no container owner decision is needed unless that work is selected.
+Remote storage is off by default. When enabled, the post-commit hook pushes the snapshots that commit links to Azure Blob Storage, with each snapshot's summary and decision extract when they exist. A summary written after its commit is pushed when it is written. Enable it in `.session-logs/config.json` in the repository:
 
-- `src/remote/sync.ts` pushes snapshots and fetches them into another clone, so a teammate can read a transcript for a commit they did not make. Push refuses any snapshot that contains redacted secrets, unless it is explicitly overridden (the override is logged by count only). Fetch verifies every object's hash.
-- `src/storage/remote-config.ts` is the opt-in factory. It returns nothing unless enabled. Authentication uses Entra ID (`DefaultAzureCredential`). Account keys are not used.
+```json
+{
+  "remote": {
+    "enabled": true,
+    "provider": "azure-blob",
+    "accountUrl": "https://<account>.blob.core.windows.net",
+    "container": "<container>"
+  }
+}
+```
 
-Before connecting it, read these access notes:
-
+- **Auth:** Entra ID through `DefaultAzureCredential` (for example `az login`). No account keys or SAS tokens. Your identity needs Storage Blob Data Contributor on the container to push and Storage Blob Data Reader to fetch. `accountUrl` must be the bare account URL; a path, query string or credentials are rejected.
+- **Push:** runs in the post-commit hook. Failures are logged to `.session-logs/errors.log` (error text only) and never block the commit. The hook waits for the upload, so a slow connection delays it.
+- **Redaction gate (D24):** a snapshot with redactions is not pushed and is logged. `sessions remote push <rev> --allow-redacted` overrides this; the override is logged by count only.
+- **Fetch:** on a clone, `sessions remote fetch <rev>` brings in the transcript snapshots that commit's trailers name, plus their summaries and decision extracts. Every object's hash is verified.
 - **Who can read:** anyone with read access to the container can read every transcript in it. Access tiers are not part of the MVP.
 - **Deletion:** removing blobs does not remove copies held by clones or teammates.
 
 ## What is not done
 
-- **Remote CLI/container integration:** deferred by owner decision. No container owner decision is needed unless that work is selected.
+- **Automatic fetch:** fetch is manual (`sessions remote fetch <rev>`).
 - **Subagent transcripts:** not captured (D23).
 - **Redaction:** best effort and pattern-based. It misses secrets that do not match a known format.
 - **Decision summaries:** the deterministic extract is built (opt-in). LLM summaries are built (opt-in, P1) and are model output, so they can be wrong. The extract finds explicit decision wording only.
@@ -251,8 +263,8 @@ src/read/              show, commits, list
 src/maintain/          fork, doctor, prune
 src/decisions/         deterministic decision extracts (opt-in)
 src/summaries/         LLM summaries via claude -p (opt-in, background worker)
-src/remote/            push and fetch (not connected)
-src/storage/           object store interface and Azure Blob adapter (not connected)
+src/remote/            push and fetch (opt-in, Azure Blob)
+src/storage/           object store interface and Azure Blob adapter (opt-in)
 scripts/live-check.sh  live Claude Code checks (run in your terminal; needs API access)
 test/                  node:test suites
 docs/                  decision log
