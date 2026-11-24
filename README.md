@@ -105,9 +105,9 @@ Three separate layers. Each is controlled on its own:
 
 | Layer | Status | Enabled by | Makes an LLM call |
 |---|---|---|---|
-| Transcript capture and commit links | Built. On after `init`. | `init` | No |
-| Deterministic decision extract | Built (MVP). **Off by default.** | `decisions.enabled` in `.session-logs/config.json` | No |
-| LLM-generated summary (opt-in) | Built (P1). **Off by default.** | `summaries.enabled` in `.session-logs/config.json` | Yes: `claude -p`, in a background worker |
+| Transcript capture and commit links | `init` | No |
+| Deterministic decision extract | `decisions.enabled` in `.session-logs/config.json` | No |
+| LLM-generated summary (opt-in) | `summaries.enabled` in `.session-logs/config.json` | Yes: `claude -p`, in a background worker |
 
 Git notes are commit-link metadata (the session trailers). They are not decision summaries.
 
@@ -127,7 +127,7 @@ What the extract does:
 - Is written to `.session-logs/decisions/<snapshot>.json`, keyed by the snapshot ID. It records the snapshot ID, the session ID, the hash of the snapshot's content, and each decision's message index and UUID. An extract is never rewritten; a changed transcript gets its own snapshot and extract.
 - Is deterministic: the same transcript always gives the same decisions.
 
-## Summaries (P1)
+## Summaries
 
 LLM summaries are a separate opt-in layer. They are off by default and are not turned on by capture or by decision extraction. Enable them with `"summaries": { "enabled": true }` in `.session-logs/config.json`. Other keys in that file are unaffected.
 
