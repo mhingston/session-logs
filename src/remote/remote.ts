@@ -3,7 +3,10 @@
 // Authentication is Entra ID through DefaultAzureCredential, so the config holds
 // no secrets: a SAS or account key in accountUrl is rejected.
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { readConfig } from "../capture/config.ts";
+import { sessionLogsRoot } from "../capture/capture.ts";
 import { snapshotsForCommit } from "../read/read.ts";
 import type { ObjectStore } from "../storage/object-store.ts";
 import { createRemoteStore, type RemoteConfig } from "../storage/remote-config.ts";
@@ -82,4 +85,13 @@ export async function pushIfLinked(repoRoot: string, snapshot: string): Promise<
   ).trim();
   if (!linked) return undefined;
   return pushSnapshots(repoRoot, store, { snapshots: [snapshot] });
+}
+
+// Brings a snapshot into the local store when its manifest is missing and remote storage
+// is enabled. Local snapshots are never re-fetched, so this is free when they exist.
+export async function ensureLocalSnapshot(repoRoot: string, snapshot: string, store?: ObjectStore): Promise<void> {
+  if (existsSync(join(sessionLogsRoot(repoRoot), "snapshots", `${snapshot}.json`))) return;
+  const remote = store ?? openRemote(repoRoot);
+  if (!remote) return;
+  await fetchSnapshot(repoRoot, remote, snapshot);
 }

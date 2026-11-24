@@ -10,7 +10,7 @@ import { sessionLogsRoot } from "../capture/capture.ts";
 import { doctor, forkSession, pruneSessions } from "../maintain/maintain.ts";
 import { decisionsEnabled, generateDecisions } from "../decisions/decisions.ts";
 import { generateSummary, summariesEnabled } from "../summaries/summaries.ts";
-import { describeError, fetchCommit, pushCommit } from "../remote/remote.ts";
+import { describeError, ensureLocalSnapshot, fetchCommit, pushCommit } from "../remote/remote.ts";
 import { readNote, rebuildNotes } from "../notes/notes.ts";
 
 function git(args: string[]): string | undefined {
@@ -98,6 +98,7 @@ async function main(argv: string[]): Promise<void> {
       return;
     }
     const format = raw ? "raw" : "markdown";
+    for (const pair of selected) await ensureLocalSnapshot(repoRoot, pair.snapshot!);
     if (selected.length === 1) {
       process.stdout.write(renderSnapshot(repoRoot, selected[0]!.snapshot!, format));
       return;
@@ -208,6 +209,7 @@ async function main(argv: string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
+    for (const pair of pairs) await ensureLocalSnapshot(repoRoot, pair.snapshot!);
     const summaries = pairs.map((pair) => generateSummary(repoRoot, pair.snapshot!));
     if (json) {
       console.log(JSON.stringify(summaries, null, 2));
@@ -305,6 +307,6 @@ async function main(argv: string[]): Promise<void> {
 }
 
 main(process.argv.slice(2)).catch((error: unknown) => {
-  console.error(`sessions: ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`sessions: ${describeError(error)}`);
   process.exitCode = 1;
 });

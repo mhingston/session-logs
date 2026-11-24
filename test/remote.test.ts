@@ -8,7 +8,7 @@ import { installHooks } from "../src/install/install.ts";
 import { recordActiveSession, sessionLogsRoot, snapshotTranscript } from "../src/capture/capture.ts";
 import { renderSnapshot, snapshotForCommit } from "../src/read/read.ts";
 import { pushSnapshots, fetchSnapshot } from "../src/remote/sync.ts";
-import { remoteConfig } from "../src/remote/remote.ts";
+import { ensureLocalSnapshot, remoteConfig } from "../src/remote/remote.ts";
 import { sha256Hex, type ObjectStore } from "../src/storage/object-store.ts";
 
 const TOOL_ROOT = resolve(new URL(".", import.meta.url).pathname, "..");
@@ -198,4 +198,31 @@ test("remote config accepts a bare account URL and rejects one carrying a SAS qu
   });
 
   rmSync(repo, { recursive: true, force: true });
+});
+
+test("show and summary fetch a missing snapshot lazily; local snapshots never touch the remote", async () => {
+  const author = mkdtempSync(join(tmpdir(), "session-logs-lazy-author-"));
+  execFileSync("git", ["init", "-q", author]);
+  const t = join(author, "t.jsonl");
+  writeFileSync(t, userLine("lazy fetch works"));
+  const snapshot = snapshotTranscript(author, "lazy-s", t, at("10:00"));
+  const store = new MemoryStore();
+  await pushSnapshots(author, store);
+
+  const reader = mkdtempSync(join(tmpdir(), "session-logs-lazy-reader-"));
+  execFileSync("git", ["init", "-q", reader]);
+  await ensureLocalSnapshot(reader, snapshot, store);
+  assert.match(renderSnapshot(reader, snapshot, "markdown"), /lazy fetch works/);
+
+  store.objects.clear();
+  await ensureLocalSnapshot(reader, snapshot, store);
+
+  const bare = mkdtempSync(join(tmpdir(), "session-logs-lazy-bare-"));
+  execFileSync("git", ["init", "-q", bare]);
+  await ensureLocalSnapshot(bare, snapshot);
+  assert.equal(existsSync(join(sessionLogsRoot(bare), "snapshots", `${snapshot}.json`)), false);
+
+  rmSync(author, { recursive: true, force: true });
+  rmSync(reader, { recursive: true, force: true });
+  rmSync(bare, { recursive: true, force: true });
 });
