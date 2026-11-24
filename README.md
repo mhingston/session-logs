@@ -219,7 +219,7 @@ Remote storage is off by default. When enabled, the post-commit hook pushes the 
 
 ## What is not done
 
-- **Automatic fetch:** fetch is manual (`sessions remote fetch <rev>`).
+- **Background fetch:** nothing is fetched on pull or checkout. Fetching happens only when `show` or `summary` needs a snapshot, or when you run `sessions remote fetch`.
 - **Subagent transcripts:** not captured (D23).
 - **Redaction:** best effort and pattern-based. It misses secrets that do not match a known format.
 - **Decision summaries:** the deterministic extract is built (opt-in). LLM summaries are built (opt-in, P1) and are model output, so they can be wrong. The extract finds explicit decision wording only.
