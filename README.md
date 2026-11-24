@@ -2,8 +2,6 @@
 
 Record Claude Code session transcripts and link every git commit to the session that produced it.
 
-> **Status: early, public.** Transcript capture, commit linking (including commits made mid-turn), git notes, reading, forks, `doctor` and `prune` work on one machine. Deterministic decision extracts are an opt-in MVP, and opt-in LLM summaries (P1) run in the background through Claude Code (see [Decision extracts](#decision-extracts) and [Summaries](#summaries-p1)). Remote storage is opt-in and connected to commits and fetch. See [Remote storage](#remote-storage). Only the snapshot IDs a commit links are pushed, and only with an explicit remote config.
-
 ## Quick start
 
 **Prerequisites:** Node.js 23.6 or later (`node -v`), `git`, and Claude Code.
