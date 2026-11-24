@@ -52,6 +52,22 @@ function sh(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+// Git shims run under Git's sh, which takes forward slashes on Windows.
+function shellPath(path: string): string {
+  return process.platform === "win32" ? path.replace(/\\/g, "/") : path;
+}
+
+// Hook commands are run by the agent's shell. POSIX single quotes on macOS and Linux;
+// double quotes with forward slashes on Windows, which work in cmd, PowerShell and Git Bash.
+export function hookCommandPath(path: string): string {
+  if (process.platform !== "win32") return sh(path);
+  const forward = shellPath(path);
+  if (/["%!^&|<>]/.test(forward)) {
+    throw new Error(`path cannot be used in a Windows hook command: ${path}`);
+  }
+  return `"${forward}"`;
+}
+
 function git(repoRoot: string, args: string[]): string | undefined {
   try {
     return execFileSync("git", ["-C", repoRoot, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
@@ -80,13 +96,13 @@ export function shimBody(
   }
   const run = (path: string) => (spec.stdin ? `"${path}" "$@" < "$in"` : `"${path}" "$@"`);
   if (globalHooksPath) {
-    lines.push(`g=${sh(join(globalHooksPath, name))}`, `[ -x "$g" ] && { ${run("$g")} || exit $?; }`);
+    lines.push(`g=${sh(shellPath(join(globalHooksPath, name)))}`, `[ -x "$g" ] && { ${run("$g")} || exit $?; }`);
   }
   if (spec.repoChain || !globalHooksPath) {
-    lines.push(`r=${sh(join(repoGitHooks, name))}`, `[ -x "$r" ] && { ${run("$r")} || exit $?; }`);
+    lines.push(`r=${sh(shellPath(join(repoGitHooks, name)))}`, `[ -x "$r" ] && { ${run("$r")} || exit $?; }`);
   }
   if (spec.ours) {
-    const script = sh(join(toolRoot, spec.ours));
+    const script = sh(shellPath(join(toolRoot, spec.ours)));
     if (name === "prepare-commit-msg") {
       // Must not fail the commit; the script always exits 0 itself.
       lines.push(`exec node ${script} "$@"`);
@@ -101,7 +117,7 @@ export function shimBody(
 
 function ensureLine(path: string, line: string): void {
   const current = existsSync(path) ? readFileSync(path, "utf8") : "";
-  if (!current.split("\n").includes(line)) {
+  if (!current.split(/\r?\n/).includes(line)) {
     const prefix = current.length === 0 || current.endsWith("\n") ? current : current + "\n";
     writeFileSync(path, prefix + line + "\n");
   }
@@ -118,7 +134,7 @@ function registerHook(settingsFile: string, toolRoot: string, event: string, scr
     ? (JSON.parse(readFileSync(settingsFile, "utf8")) as Record<string, unknown>)
     : {};
   const hooks = (settings.hooks ?? {}) as Record<string, Array<{ hooks: Array<{ type: string; command: string }> }>>;
-  const command = `node ${sh(join(toolRoot, script))}`;
+  const command = `node ${hookCommandPath(join(toolRoot, script))}`;
   // Drop stale session-logs entries for this script (e.g. after moving the checkout)
   // while leaving unrelated hooks untouched.
   const groups = (hooks[event] ?? [])

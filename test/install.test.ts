@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { installHooks } from "../src/install/install.ts";
+import { hookCommandPath, installHooks } from "../src/install/install.ts";
 
 const TOOL_ROOT = resolve(new URL(".", import.meta.url).pathname, "..");
 
@@ -121,4 +121,21 @@ test("the repository's own prepare-commit-msg hook is chained when there is no g
   git(repo, ["add", "c.txt"]);
   git(repo, ["commit", "-q", "-m", "Chained"]);
   assert.match(git(repo, ["log", "-1", "--format=%B"]), /^repo-hook$/m);
+});
+
+test("hook command paths quote for POSIX shells and for Windows shells", () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  const withPlatform = (value: string, fn: () => void) => {
+    Object.defineProperty(process, "platform", { value });
+    try {
+      fn();
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
+  };
+  withPlatform("darwin", () => assert.equal(hookCommandPath("/a b/x.ts"), "'/a b/x.ts'"));
+  withPlatform("win32", () => {
+    assert.equal(hookCommandPath("C:\\Users\\me\\session logs\\src\\x.ts"), '"C:/Users/me/session logs/src/x.ts"');
+    assert.throws(() => hookCommandPath("C:\\a%PATH%\\x.ts"), /Windows hook command/);
+  });
 });

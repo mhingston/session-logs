@@ -4,7 +4,7 @@ Record Claude Code session transcripts and link every git commit to the session 
 
 ## Quick start
 
-**Prerequisites:** Node.js 23.6 or later (`node -v`), `git`, and Claude Code.
+**Prerequisites:** Node.js 23.6 or later (`node -v`), `git`, and Claude Code. On Windows, also install Git for Windows: its `sh` runs the git hooks, and the Claude Code hooks use the same paths.
 
 ### 1. Clone and verify (once)
 
@@ -15,11 +15,15 @@ npm install
 npm run check          # type-check and test suite
 ```
 
-Optional — add shell aliases (e.g. in `~/.zshrc` or `~/.bashrc`) so you don't have to type the full path:
+Optional — add shell aliases (e.g. in `~/.zshrc` or `~/.bashrc`) so you don't have to type the full path. On Windows PowerShell, add functions to your `$PROFILE` instead:
 
 ```sh
 alias sessions-init='node /path/to/session-logs/src/cli/init.ts'
 alias sessions='node /path/to/session-logs/src/cli/sessions.ts'
+```
+
+```powershell
+function sessions { node C:/path/to/session-logs/src/cli/sessions.ts @args }
 ```
 
 ### 2. Enable in a repository (once per clone)
@@ -149,6 +153,8 @@ LLM summaries are a separate opt-in layer. They are off by default and are not t
 mkdir -p ~/.claude/skills && ln -s /path/to/session-logs/skills/session-logs ~/.claude/skills/session-logs
 ```
 
+On Windows (PowerShell), create a junction instead, which needs no admin rights: `New-Item -ItemType Junction -Path "$HOME\.claude\skills\session-logs" -Target "C:\path\to\session-logs\skills\session-logs"`. Create the `skills` folder first if it does not exist.
+
 ## What is stored
 
 - Only `user` and `assistant` conversation entries are stored. Session metadata, cost data, and injected system context (your CLAUDE.md, managed policy text, memory) are not stored. Each snapshot's manifest counts what was left out, by type.
@@ -227,10 +233,10 @@ Unit tests do not call Claude Code. To check the hooks against a live session, r
 
 ```sh
 cd /path/to/session-logs
-scripts/live-check.sh
+node scripts/live-check.ts
 ```
 
-It creates a throwaway repository, runs a session and a fork, and prints the hook payload fields and the fork's `SessionStart` source.
+It creates a throwaway repository, runs a session and a fork, and prints the hook payload fields and the fork's `SessionStart` source. Output goes to `~/Downloads/live-check-<time>` unless you pass a directory.
 
 ## Development
 
@@ -255,7 +261,7 @@ src/decisions/         deterministic decision extracts (opt-in)
 src/summaries/         LLM summaries via claude -p (opt-in, background worker)
 src/remote/            push and fetch (opt-in, Azure Blob)
 src/storage/           object store interface and Azure Blob adapter (opt-in)
-scripts/live-check.sh  live Claude Code checks (run in your terminal; needs API access)
+scripts/live-check.ts  live Claude Code checks (run in your terminal; needs API access)
 test/                  node:test suites
 docs/                  decision log
 ```

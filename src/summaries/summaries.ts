@@ -9,7 +9,13 @@
 //
 // Summaries are model output and are not deterministic. Each record names its snapshot
 // and source content hash, so it can be traced to the transcript version it describes.
-import { execFileSync, spawn } from "node:child_process";
+import {
+  execFileSync,
+  execSync,
+  spawn,
+  type ExecFileSyncOptionsWithStringEncoding,
+  type ExecSyncOptionsWithStringEncoding,
+} from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -180,18 +186,37 @@ export function buildPrompt(lines: string[]): { prompt: string; messages: number
 // the guard variable set so the Stop hook does not capture this run. Failures are
 // reported by exit status or signal only: stderr and stdout can quote the transcript,
 // so they are never put in the error.
+// Runs the claude CLI with stdin input. On Windows the CLI is usually claude.cmd, which
+// only runs through a shell; arguments are quoted there.
+export function runClaudeCli(
+  bin: string,
+  args: string[],
+  options: { input?: string; cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number },
+): string {
+  const common: ExecFileSyncOptionsWithStringEncoding = {
+    cwd: options.cwd,
+    input: options.input,
+    encoding: "utf8",
+    timeout: options.timeout,
+    maxBuffer: 16 * 1024 * 1024,
+    env: options.env,
+    stdio: ["pipe", "pipe", "pipe"],
+  };
+  if (process.platform !== "win32") {
+    return execFileSync(bin, args, common);
+  }
+  return execSync([`"${bin}"`, ...args.map((arg) => `"${arg}"`)].join(" "), common as ExecSyncOptionsWithStringEncoding);
+}
+
 export function runClaudePrint(prompt: string): string {
   const bin = process.env[CLAUDE_BIN_ENV] ?? "claude";
   const cwd = mkdtempSync(join(tmpdir(), "session-logs-summary-"));
   try {
-    const output = execFileSync(bin, ["-p", "--tools", "", "--no-session-persistence"], {
+    const output = runClaudeCli(bin, ["-p", "--tools", "", "--no-session-persistence"], {
       cwd,
       input: prompt,
-      encoding: "utf8",
       timeout: SUMMARY_TIMEOUT_MS,
-      maxBuffer: 16 * 1024 * 1024,
       env: { ...process.env, [SUMMARIZING_ENV]: "1" },
-      stdio: ["pipe", "pipe", "pipe"],
     });
     return output.trim();
   } catch (error) {

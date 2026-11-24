@@ -12,10 +12,10 @@ session-logs records each Claude Code session's conversation under `.session-log
 Run the tool from its install location. Read the absolute path from the repository's Stop hook, which `init` writes:
 
 ```sh
-grep -o "[^\"' ]*src/hooks/stop.ts" .claude/settings.local.json | head -1
+node -p "JSON.stringify(require('./.claude/settings.local.json').hooks.Stop)"
 ```
 
-The tool root is that path minus `src/hooks/stop.ts`. Set `S` to `<tool root>/src/cli/sessions.ts` and run commands from inside the repository:
+The command contains the path to `src/hooks/stop.ts`. The tool root is that path minus `src/hooks/stop.ts`. Set `S` to `<tool root>/src/cli/sessions.ts` and run commands from inside the repository:
 
 ```sh
 node "$S" list                    # sessions recorded in this repository (--full for 64-char snapshot IDs)
