@@ -103,7 +103,7 @@ Forks link to their parent automatically when Claude Code forks a session (`clau
 
 Three separate layers. Each is controlled on its own:
 
-| Layer | Status | Enabled by | Makes an LLM call |
+| Layer | Enabled by | Makes an LLM call |
 |---|---|---|---|
 | Transcript capture and commit links | `init` | No |
 | Deterministic decision extract | `decisions.enabled` in `.session-logs/config.json` | No |
@@ -216,14 +216,6 @@ Remote storage is off by default. When enabled, the post-commit hook pushes the 
 - **Fetch:** `sessions show` and `sessions summary` fetch a missing snapshot from the remote on demand, along with its summary and decision extract. A snapshot already in the local store is never re-fetched. `sessions remote fetch <rev>` brings in a commit's snapshots explicitly. A clone needs the same `remote` block in its own `.session-logs/config.json`. Every object's hash is verified.
 - **Who can read:** anyone with read access to the container can read every transcript in it. Access tiers are not part of the MVP.
 - **Deletion:** removing blobs does not remove copies held by clones or teammates.
-
-## What is not done
-
-- **Background fetch:** nothing is fetched on pull or checkout. Fetching happens only when `show` or `summary` needs a snapshot, or when you run `sessions remote fetch`.
-- **Subagent transcripts:** not captured (D23).
-- **Redaction:** best effort and pattern-based. It misses secrets that do not match a known format.
-- **Decision summaries:** the deterministic extract is built (opt-in). LLM summaries are built (opt-in, P1) and are model output, so they can be wrong. The extract finds explicit decision wording only.
-- **Concurrent sessions in one repository:** a commit links the most recent session that stopped since the previous commit, and lists others as `Also-Active:`. The link is a heuristic, not proof of which session wrote the change.
 
 ## Design
 
