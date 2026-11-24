@@ -14,6 +14,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface InstallOptions {
   repoRoot: string;
@@ -38,12 +39,20 @@ interface HookSpec {
   repoChain?: boolean;
 }
 
+// Built output lives in dist/ as .js; running from source (tests, dev) uses src/ as .ts.
+// Hook paths are named by their dist/ location and mapped to whichever layout is running.
+export function hookScript(distRelative: string): string {
+  const running = fileURLToPath(import.meta.url);
+  if (running.endsWith(".js")) return distRelative;
+  return distRelative.replace(/^dist\//, "src/").replace(/\.js$/, ".ts");
+}
+
 export const HOOK_SPECS: Record<string, HookSpec> = {
   "pre-commit": {},
   "commit-msg": {},
-  "post-commit": { ours: "src/hooks/post-commit.ts" },
-  "post-rewrite": { ours: "src/hooks/post-rewrite.ts", stdin: true },
-  "prepare-commit-msg": { ours: "src/hooks/prepare-commit-msg.ts", repoChain: true },
+  "post-commit": { ours: "dist/hooks/post-commit.js" },
+  "post-rewrite": { ours: "dist/hooks/post-rewrite.js", stdin: true },
+  "prepare-commit-msg": { ours: "dist/hooks/prepare-commit-msg.js", repoChain: true },
 };
 
 const GIT_HOOK_NAMES = Object.keys(HOOK_SPECS);
@@ -102,7 +111,7 @@ export function shimBody(
     lines.push(`r=${sh(shellPath(join(repoGitHooks, name)))}`, `[ -x "$r" ] && { ${run("$r")} || exit $?; }`);
   }
   if (spec.ours) {
-    const script = sh(shellPath(join(toolRoot, spec.ours)));
+    const script = sh(shellPath(join(toolRoot, hookScript(spec.ours))));
     if (name === "prepare-commit-msg") {
       // Must not fail the commit; the script always exits 0 itself.
       lines.push(`exec node ${script} "$@"`);
@@ -182,8 +191,8 @@ export function installHooks(options: InstallOptions): InstallResult {
   ensureLine(join(repoRoot, ".gitignore"), ".claude/settings.local.json");
 
   const settingsFile = join(repoRoot, ".claude", "settings.local.json");
-  registerHook(settingsFile, toolRoot, "Stop", "src/hooks/stop.ts");
-  registerHook(settingsFile, toolRoot, "UserPromptSubmit", "src/hooks/user-prompt-submit.ts");
+  registerHook(settingsFile, toolRoot, "Stop", hookScript("dist/hooks/stop.js"));
+  registerHook(settingsFile, toolRoot, "UserPromptSubmit", hookScript("dist/hooks/user-prompt-submit.js"));
 
   return { hooksPath: ourHooksDir, shims, settingsFile };
 }

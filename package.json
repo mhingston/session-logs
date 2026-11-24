@@ -1,16 +1,52 @@
 {
-  "name": "session-logs",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
+  "name": "@mhingston5/session-logs",
+  "version": "0.1.0",
   "description": "Record Claude Code session transcripts and link them to git commits",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "git",
+    "transcript",
+    "session",
+    "commit",
+    "audit",
+    "ai-agents"
+  ],
+  "author": "Mark Hingston <mhingston@pm.me>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mhingston/session-logs.git"
+  },
+  "homepage": "https://github.com/mhingston/session-logs#readme",
+  "bugs": {
+    "url": "https://github.com/mhingston/session-logs/issues"
+  },
+  "type": "module",
+  "bin": {
+    "sessions": "./dist/cli/sessions.js",
+    "sessions-init": "./dist/cli/init.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "docs",
+    "LICENSE",
+    "README.md"
+  ],
   "engines": {
     "node": ">=23.6"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/cli/sessions.js',0o755);require('fs').chmodSync('dist/cli/init.js',0o755)\"",
     "test": "node --test \"test/*.test.ts\"",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check"
   },
   "dependencies": {
     "@azure/identity": "4.14.1",

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // `init`: installs session-logs into the current git repository (opt-in).
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";

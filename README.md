@@ -6,32 +6,22 @@ Record Claude Code session transcripts and link every git commit to the session 
 
 **Prerequisites:** Node.js 23.6 or later (`node -v`), `git`, and Claude Code. On Windows, also install Git for Windows: its `sh` runs the git hooks, and the Claude Code hooks use the same paths.
 
-### 1. Clone and verify (once)
+### 1. Install (once)
 
 ```sh
-git clone https://github.com/mhingston/session-logs
-cd session-logs
-npm install
-npm run check          # type-check and test suite
+npm install -g @mhingston5/session-logs
 ```
 
-Optional — add shell aliases (e.g. in `~/.zshrc` or `~/.bashrc`) so you don't have to type the full path. On Windows PowerShell, add functions to your `$PROFILE` instead:
+This installs two commands: `sessions-init` and `sessions`. Check the install with `sessions --help`.
 
-```sh
-alias sessions-init='node /path/to/session-logs/src/cli/init.ts'
-alias sessions='node /path/to/session-logs/src/cli/sessions.ts'
-```
-
-```powershell
-function sessions { node C:/path/to/session-logs/src/cli/sessions.ts @args }
-```
+To run from a git clone instead, see [Development](#development).
 
 ### 2. Enable in a repository (once per clone)
 
 ```sh
 cd /path/to/your-repo
-node /path/to/session-logs/src/cli/init.ts
-node /path/to/session-logs/src/cli/sessions.ts doctor
+sessions-init
+sessions doctor
 ```
 
 `doctor` should report no warnings (`info  no unlinked commits found during recorded sessions`).
@@ -55,8 +45,8 @@ Transcript: a53e7356f3e25c3e299a87cf142a603eff5d3c99c3fa3b619ed0aadf1fcb3713
 ### 4. Read it back
 
 ```sh
-node /path/to/session-logs/src/cli/sessions.ts list
-node /path/to/session-logs/src/cli/sessions.ts show HEAD
+sessions list
+sessions show HEAD
 ```
 
 If `show` finds nothing, run `doctor` first.
@@ -73,28 +63,26 @@ If `show` finds nothing, run `doctor` first.
 
 ## Commands
 
-Run these from anywhere inside the repository. Replace the path with wherever you cloned this tool (or use the `sessions` alias from Quick start). Run `sessions --help` at any time for a summary.
+Run these from anywhere inside the repository. Run `sessions --help` at any time for a summary.
 
 ```sh
-S=/path/to/session-logs/src/cli/sessions.ts
-
-node $S list                             # sessions recorded in this repository (12-char snapshot IDs)
-node $S list --full                      # sessions with full 64-char snapshot IDs
-node $S commits <session-id>             # commits linked to a session
-node $S show <rev>                       # transcript(s) as of that commit (conversation turns only)
-node $S show <rev> --session <id>        # one session's transcript from a squashed commit
-node $S show <rev> --raw                 # stored JSONL, one entry per line
-node $S doctor                           # health check: hooks, store integrity, unlinked commits, missing notes
-node $S notes show <rev>                 # the git note for a commit (its session trailers)
-node $S notes rebuild                    # rebuild every note from trailers
-node $S decisions <rev>                  # deterministic decision extract for a commit's transcript (needs opt-in)
-node $S decisions <rev> --json           # same, as JSON with snapshot and content hash
-node $S summary <rev>                    # LLM summary of a commit's transcript (needs opt-in; generates if missing)
-node $S fork <session> --at <snapshot>   # new session record from a snapshot (full ID or unique prefix from list)
-node $S prune --older-than 30            # dry run: which old, unlinked sessions would be removed
-node $S prune --older-than 30 --apply    # delete them
-node $S remote push <rev>                # push a commit's linked snapshots and summaries (needs remote config)
-node $S remote fetch <rev>               # fetch a commit's linked snapshots from the remote
+sessions list                             # sessions recorded in this repository (12-char snapshot IDs)
+sessions list --full                      # sessions with full 64-char snapshot IDs
+sessions commits <session-id>             # commits linked to a session
+sessions show <rev>                       # transcript(s) as of that commit (conversation turns only)
+sessions show <rev> --session <id>        # one session's transcript from a squashed commit
+sessions show <rev> --raw                 # stored JSONL, one entry per line
+sessions doctor                           # health check: hooks, store integrity, unlinked commits, missing notes
+sessions notes show <rev>                 # the git note for a commit (its session trailers)
+sessions notes rebuild                    # rebuild every note from trailers
+sessions decisions <rev>                  # deterministic decision extract for a commit's transcript (needs opt-in)
+sessions decisions <rev> --json           # same, as JSON with snapshot and content hash
+sessions summary <rev>                    # LLM summary of a commit's transcript (needs opt-in; generates if missing)
+sessions fork <session> --at <snapshot>   # new session record from a snapshot (full ID or unique prefix from list)
+sessions prune --older-than 30            # dry run: which old, unlinked sessions would be removed
+sessions prune --older-than 30 --apply    # delete them
+sessions remote push <rev>                # push a commit's linked snapshots and summaries (needs remote config)
+sessions remote fetch <rev>               # fetch a commit's linked snapshots from the remote
 ```
 
 Pruning is **off** unless you pass `--older-than` or set `prune.olderThanDays` in `.session-logs/config.json`. It removes whole sessions only, and never linked ones unless you pass `--include-linked`. Pruning a linked session makes `show` fail for those commits.
@@ -109,7 +97,7 @@ Three separate layers. Each is controlled on its own:
 
 | Layer | Enabled by | Makes an LLM call |
 |---|---|---|---|
-| Transcript capture and commit links | `init` | No |
+| Transcript capture and commit links | `sessions-init` | No |
 | Deterministic decision extract | `decisions.enabled` in `.session-logs/config.json` | No |
 | LLM-generated summary (opt-in) | `summaries.enabled` in `.session-logs/config.json` | Yes: `claude -p`, in a background worker |
 
@@ -150,7 +138,7 @@ LLM summaries are a separate opt-in layer. They are off by default and are not t
 `skills/session-logs/SKILL.md` teaches Claude Code to answer "why was this commit made?" from a session's transcript, and to run `doctor`. Claude Code only loads skills from `~/.claude/skills` or `.claude/skills`, so link it once:
 
 ```sh
-mkdir -p ~/.claude/skills && ln -s /path/to/session-logs/skills/session-logs ~/.claude/skills/session-logs
+mkdir -p ~/.claude/skills && ln -s "$(npm root -g)/@mhingston5/session-logs/skills/session-logs" ~/.claude/skills/session-logs
 ```
 
 On Windows (PowerShell), create a junction instead, which needs no admin rights: `New-Item -ItemType Junction -Path "$HOME\.claude\skills\session-logs" -Target "C:\path\to\session-logs\skills\session-logs"`. Create the `skills` folder first if it does not exist.
@@ -177,7 +165,7 @@ On Windows (PowerShell), create a junction instead, which needs no admin rights:
 
 ## Installation details
 
-`init` does three things in the repository:
+`sessions-init` does three things in the repository:
 
 1. Points `core.hooksPath` at `.session-logs/git-hooks`. Each git hook shim runs your global hook of the same name first, then session-logs:
    - `prepare-commit-msg` adds the session trailers, and also runs the repository's own `.git/hooks` script.
@@ -188,18 +176,18 @@ On Windows (PowerShell), create a junction instead, which needs no admin rights:
 
 It refuses to replace a `core.hooksPath` it did not set (for example Husky's), so it cannot silently disable other tools. It is safe to re-run.
 
-**If you move this checkout, re-run `init` in each repository.** The hooks and settings contain its absolute path; re-running `init` replaces stale paths cleanly, and `doctor` warns if any registered hook points to a missing script.
+**If you move or reinstall session-logs (for example after changing Node versions or upgrading the global install path), re-run `sessions-init` in each repository.** The hooks and settings contain its absolute path; re-running `sessions-init` replaces stale paths cleanly, and `doctor` warns if any registered hook points to a missing script.
 
 ## Troubleshooting
 
 - **`show` says "has no Transcript trailer".** The commit was made outside a session, or the hook did not run. Run `doctor`.
-- **`doctor` warns "commit hooks are not installed".** Run `init` in this repository.
+- **`doctor` warns "commit hooks are not installed".** Run `sessions-init` in this repository.
 - **`doctor` reports an unlinked commit during a session.** This is a heuristic: it thinks a session was active when the commit was made. Check it. Commits made with `--no-verify` are still linked, by design (D45).
 - **A commit has no trailers.** Read `.session-logs/errors.log`. The commit still succeeds when a hook fails, by design.
 - **`prune` says it is off.** Pass `--older-than <days>`.
 - **`doctor` warns that linked commits have no note.** Run `sessions notes rebuild`.
-- **Commits made mid-turn have no link.** Re-run `init`. It registers the `UserPromptSubmit` hook, which older installs lack.
-- **Hooks stopped working after moving the checkout.** Re-run `init`.
+- **Commits made mid-turn have no link.** Re-run `sessions-init`. It registers the `UserPromptSubmit` hook, which older installs lack.
+- **Hooks stopped working after moving or reinstalling session-logs.** Re-run `sessions-init`.
 
 ## Remote storage
 
@@ -232,7 +220,9 @@ The decision log is [`docs/DECISIONS.md`](docs/DECISIONS.md).
 Unit tests do not call Claude Code. To check the hooks against a live session, run this in your own terminal (it needs API access):
 
 ```sh
-cd /path/to/session-logs
+git clone https://github.com/mhingston/session-logs
+cd session-logs
+npm install
 node scripts/live-check.ts
 ```
 
@@ -244,8 +234,11 @@ It creates a throwaway repository, runs a session and a fork, and prints the hoo
 npm install
 npm test          # unit and integration tests; no network access
 npm run typecheck # TypeScript, strict
-npm run check     # both
+npm run build     # compile src/ to dist/ (what the npm package ships)
+npm run check     # typecheck and tests
 ```
+
+The published package runs the compiled `dist/` output. Node refuses to strip types from files under `node_modules`, so the TypeScript sources are compiled to JavaScript on `npm pack` and `npm publish`. Source files stay `.ts`, and tests run against them directly.
 
 Layout:
 

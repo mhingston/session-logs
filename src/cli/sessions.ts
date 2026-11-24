@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // `sessions` command: read-only queries over the local session store.
 //   sessions show <rev> [--raw]   transcript as it was when <rev> was committed
 //   sessions commits <session>    commits linked to a session

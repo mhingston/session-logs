@@ -67,7 +67,7 @@ writeFileSync(join(PROBE, "hook.mjs"), PROBE_SCRIPT);
 git(["init", "-q", "-b", "main", "."]);
 git(["config", "user.name", "live-check"]);
 git(["config", "user.email", "live-check@example.invalid"]);
-execFileSync(process.execPath, [join(TOOL, "src/cli/init.ts")], { cwd: REPO, stdio: "ignore" });
+execFileSync(process.execPath, [join(TOOL, "dist/cli/init.js")], { cwd: REPO, stdio: "ignore" });
 
 // Add probe hooks next to the session-logs hooks, without removing them.
 const settingsPath = join(REPO, ".claude", "settings.local.json");

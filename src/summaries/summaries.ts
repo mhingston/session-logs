@@ -279,7 +279,8 @@ export function generateSummary(
 // started when a summary already exists for the snapshot.
 export function spawnBackgroundSummary(repoRoot: string, snapshot: string): void {
   if (readSummary(repoRoot, snapshot)) return;
-  const worker = join(dirname(fileURLToPath(import.meta.url)), "worker.ts");
+  const self = fileURLToPath(import.meta.url);
+  const worker = join(dirname(self), self.endsWith(".js") ? "worker.js" : "worker.ts");
   const child = spawn(process.execPath, [worker, repoRoot, snapshot], {
     detached: true,
     stdio: "ignore",

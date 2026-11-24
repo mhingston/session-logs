@@ -8,6 +8,7 @@ import { sha256Hex } from "../storage/object-store.ts";
 import { readSnapshotLines, readManifest, commitsForSession, resolveSnapshotId } from "../read/read.ts";
 import { readNote } from "../notes/notes.ts";
 import { lockBusy, tryLock } from "../summaries/summaries.ts";
+import { hookScript } from "../install/install.ts";
 
 const HASH_PREFIX = /^[0-9a-f]{4,64}$/;
 
@@ -116,7 +117,7 @@ export function doctor(repoRoot: string): Finding[] {
     }
   };
 
-  const stopPaths = registeredHookPaths("Stop", "src/hooks/stop.ts");
+  const stopPaths = registeredHookPaths("Stop", hookScript("dist/hooks/stop.js"));
   if (stopPaths.length === 0) {
     findings.push({ level: "warn", message: "Stop hook is not registered in .claude/settings.local.json (run init)" });
   } else if (stopPaths.some((p) => !existsSync(p))) {
@@ -125,7 +126,7 @@ export function doctor(repoRoot: string): Finding[] {
       message: "Stop hook in .claude/settings.local.json points to a missing script; re-run init",
     });
   }
-  const promptPaths = registeredHookPaths("UserPromptSubmit", "src/hooks/user-prompt-submit.ts");
+  const promptPaths = registeredHookPaths("UserPromptSubmit", hookScript("dist/hooks/user-prompt-submit.js"));
   if (promptPaths.length === 0) {
     findings.push({ level: "warn", message: "UserPromptSubmit hook is not registered; commits made mid-turn will not link (run init)" });
   } else if (promptPaths.some((p) => !existsSync(p))) {

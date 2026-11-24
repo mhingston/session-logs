@@ -40,8 +40,8 @@ test("install points core.hooksPath at managed shims and registers the Stop hook
   }
   const settings = JSON.parse(readFileSync(result.settingsFile, "utf8"));
   assert.equal(settings.hooks.Stop[0].hooks[0].type, "command");
-  assert.match(settings.hooks.Stop[0].hooks[0].command, /src\/hooks\/stop\.ts/);
-  assert.match(settings.hooks.UserPromptSubmit[0].hooks[0].command, /src\/hooks\/user-prompt-submit\.ts/);
+  assert.match(settings.hooks.Stop[0].hooks[0].command, /hooks\/stop\.ts/);
+  assert.match(settings.hooks.UserPromptSubmit[0].hooks[0].command, /hooks\/user-prompt-submit\.ts/);
   const gitignore = readFileSync(join(repo, ".gitignore"), "utf8");
   assert.match(gitignore, /^\.session-logs\/$/m);
   assert.match(gitignore, /^\.claude\/settings\.local\.json$/m);
