@@ -2,7 +2,7 @@
 
 Record Claude Code session transcripts and link every git commit to the session that produced it.
 
-> **Status: early, public.** Transcript capture, commit linking (including commits made mid-turn), git notes, reading, forks, `doctor` and `prune` work on one machine. Deterministic decision extracts are an opt-in MVP (see [Decision extracts](#decision-extracts)). LLM-generated summaries are not built (P1). Remote sync is library code only and is not connected to any command. See [What is not done](#what-is-not-done).
+> **Status: early, public.** Transcript capture, commit linking (including commits made mid-turn), git notes, reading, forks, `doctor` and `prune` work on one machine. Deterministic decision extracts are an opt-in MVP, and opt-in LLM summaries (P1) run in the background through Claude Code (see [Decision extracts](#decision-extracts) and [Summaries](#summaries-p1)). Remote sync is library code only and is not connected to any command. See [What is not done](#what-is-not-done).
 
 ## Quick start
 
@@ -87,6 +87,7 @@ node $S notes show <rev>                 # the git note for a commit (its sessio
 node $S notes rebuild                    # rebuild every note from trailers
 node $S decisions <rev>                  # deterministic decision extract for a commit's transcript (needs opt-in)
 node $S decisions <rev> --json           # same, as JSON with snapshot and content hash
+node $S summary <rev>                    # LLM summary of a commit's transcript (needs opt-in; generates if missing)
 node $S fork <session> --at <snapshot>   # new session record from a snapshot (full ID or unique prefix from list)
 node $S prune --older-than 30            # dry run: which old, unlinked sessions would be removed
 node $S prune --older-than 30 --apply    # delete them
@@ -106,7 +107,7 @@ Three separate layers. Each is controlled on its own:
 |---|---|---|---|
 | Transcript capture and commit links | Built. On after `init`. | `init` | No |
 | Deterministic decision extract | Built (MVP). **Off by default.** | `decisions.enabled` in `.session-logs/config.json` | No |
-| LLM-generated summary | Not built (P1) | Not available | Would |
+| LLM-generated summary (opt-in) | Built (P1). **Off by default.** | `summaries.enabled` in `.session-logs/config.json` | Yes: `claude -p`, in a background worker |
 
 Git notes are commit-link metadata (the session trailers). They are not decision summaries.
 
@@ -125,6 +126,20 @@ What the extract does:
 - Runs on the redacted snapshot only, so it cannot contain anything the transcript store does not.
 - Is written to `.session-logs/decisions/<snapshot>.json`, keyed by the snapshot ID. It records the snapshot ID, the session ID, the hash of the snapshot's content, and each decision's message index and UUID. An extract is never rewritten; a changed transcript gets its own snapshot and extract.
 - Is deterministic: the same transcript always gives the same decisions.
+
+## Summaries (P1)
+
+LLM summaries are a separate opt-in layer. They are off by default and are not turned on by capture or by decision extraction. Enable them with `"summaries": { "enabled": true }` in `.session-logs/config.json`. Other keys in that file are unaffected.
+
+- **Model:** Claude Code itself, run headless (`claude -p`). It uses the login you already have for Claude Code. session-logs makes no other network call for summaries.
+- **Input:** only the stored, redacted `user` and `assistant` text of the snapshot (D24, D44). Redaction is best effort, and a summary can still repeat anything that survived it. Transcripts over 200,000 characters keep their most recent messages, and the record says so.
+- **Trigger:** the Stop hook starts a detached worker, so the hook returns at once. The worker writes `.session-logs/summaries/<snapshot>.json`. Failures go to `errors.log` as error text only, with the exit status or signal and never the model's stderr or output. A snapshot that already has a summary is not summarized again.
+- **Locking:** a per-snapshot lock file is held while the model runs. Workers, `sessions summary` and `prune` all use it. Two callers never call the model for the same snapshot, and `prune` skips a session whose summary is in progress. A lock older than 15 minutes is treated as left behind by a dead process.
+- **Size limit:** if even the newest message is over 200,000 characters, no summary is made and the error is logged.
+- **Recursion guard:** the summarizer's own run sets `SESSION_LOGS_SUMMARIZING=1`, and the Stop hook ignores any run that has it. The run uses no tools, saves no session, and starts in a temporary directory.
+- **Not deterministic:** the output is model text. Each record names its snapshot and the source content hash, so you can trace it to the transcript version it describes. Treat it as a draft and check it against the transcript.
+
+`sessions summary <rev>` prints the stored summary. If none exists yet and summaries are enabled, it generates one in the foreground.
 
 ## Agent skill
 
@@ -149,7 +164,8 @@ mkdir -p ~/.claude/skills && ln -s /path/to/session-logs/skills/session-logs ~/.
 | Claude Code hook registration (Stop, UserPromptSubmit) | `.claude/settings.local.json` | Per developer. Gitignored. |
 | Git notes (session links per commit) | `.session-logs/notes.git` | A bare repository, read through git alternates. Rebuildable from trailers. Nothing is written to the main repository's refs. |
 | Decision extracts (opt-in) | `.session-logs/decisions/<snapshot>.json` | Gitignored. Local only. Created only when `decisions.enabled` is true. |
-| Decision opt-in setting | `.session-logs/config.json` | `{ "decisions": { "enabled": true } }`. Also holds `prune.olderThanDays`. |
+| Summaries (opt-in) | `.session-logs/summaries/<snapshot>.json` | Gitignored. Local only. Created only when `summaries.enabled` is true. |
+| Opt-in settings | `.session-logs/config.json` | `{ "decisions": { "enabled": true }, "summaries": { "enabled": true } }`. Also holds `prune.olderThanDays`. |
 | Hook errors | `.session-logs/errors.log` | Error text only; never transcript content. |
 | Decisions and findings | `docs/DECISIONS.md`, `docs/M0-findings.md` | |
 
@@ -196,7 +212,7 @@ Before connecting it, read these access notes:
 - **Remote CLI/container integration:** deferred by owner decision. No container owner decision is needed unless that work is selected.
 - **Subagent transcripts:** not captured (D23).
 - **Redaction:** best effort and pattern-based. It misses secrets that do not match a known format.
-- **Decision summaries:** the deterministic extract is built (opt-in). LLM-generated summaries are P1 and not built. The extract finds explicit decision wording only.
+- **Decision summaries:** the deterministic extract is built (opt-in). LLM summaries are built (opt-in, P1) and are model output, so they can be wrong. The extract finds explicit decision wording only.
 - **Concurrent sessions in one repository:** a commit links the most recent session that stopped since the previous commit, and lists others as `Also-Active:`. The link is a heuristic, not proof of which session wrote the change.
 
 ## Design
@@ -234,6 +250,7 @@ src/notes/             git notes under .session-logs/notes.git
 src/read/              show, commits, list
 src/maintain/          fork, doctor, prune
 src/decisions/         deterministic decision extracts (opt-in)
+src/summaries/         LLM summaries via claude -p (opt-in, background worker)
 src/remote/            push and fetch (not connected)
 src/storage/           object store interface and Azure Blob adapter (not connected)
 scripts/live-check.sh  live Claude Code checks (run in your terminal; needs API access)
