@@ -10,7 +10,8 @@
 // Summaries are model output and are not deterministic. Each record names its snapshot
 // and source content hash, so it can be traced to the transcript version it describes.
 import { execFileSync, spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +29,7 @@ export const MAX_TRANSCRIPT_CHARS = 200_000;
 const SUMMARY_TIMEOUT_MS = 5 * 60 * 1000;
 // Must be longer than SUMMARY_TIMEOUT_MS, so a live run never looks stale.
 const LOCK_STALE_MS = 15 * 60 * 1000;
+const RECLAIM_STALE_MS = 60 * 1000;
 const SNAPSHOT_ID = /^[0-9a-f]{64}$/;
 
 const INSTRUCTIONS = [
@@ -86,27 +88,63 @@ export function lockPath(repoRoot: string, snapshot: string): string {
 }
 
 export function lockBusy(repoRoot: string, snapshot: string): boolean {
-  const path = lockPath(repoRoot, snapshot);
-  return existsSync(path) && Date.now() - statSync(path).mtimeMs < LOCK_STALE_MS;
+  return !isStale(lockPath(repoRoot, snapshot), LOCK_STALE_MS);
 }
 
-// Returns a release function, or undefined when another holder has the lock.
+// A missing file counts as stale, so the caller falls through to a fresh create.
+function isStale(path: string, maxAgeMs: number): boolean {
+  try {
+    return Date.now() - statSync(path).mtimeMs >= maxAgeMs;
+  } catch {
+    return true;
+  }
+}
+
+function createExclusive(path: string, token: string): boolean {
+  try {
+    writeFileSync(path, token, { flag: "wx" });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  }
+}
+
+// Stale-lock reclamation runs under a short-lived reclaim lock, so two callers cannot
+// both replace the same stale lock. A reclaim lock left by a crashed process is cleared
+// after RECLAIM_STALE_MS.
+function acquireReclaim(lockFile: string): (() => void) | undefined {
+  const reclaim = `${lockFile}.reclaim`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (createExclusive(reclaim, "reclaim")) return () => rmSync(reclaim, { force: true });
+    if (!isStale(reclaim, RECLAIM_STALE_MS)) return undefined;
+    rmSync(reclaim, { force: true });
+  }
+  return undefined;
+}
+
+// Returns a release function, or undefined when another holder has the lock. Release
+// removes the lock only if it still holds this caller's token, so a caller whose lock
+// was reclaimed cannot delete the new holder's lock.
 export function tryLock(repoRoot: string, snapshot: string): (() => void) | undefined {
   const path = lockPath(repoRoot, snapshot);
   mkdirSync(summaryDir(repoRoot), { recursive: true });
-  try {
-    closeSync(openSync(path, "wx"));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  const token = randomUUID();
+  if (!createExclusive(path, token)) {
     if (lockBusy(repoRoot, snapshot)) return undefined;
-    rmSync(path, { force: true });
+    const releaseReclaim = acquireReclaim(path);
+    if (!releaseReclaim) return undefined;
     try {
-      closeSync(openSync(path, "wx"));
-    } catch {
-      return undefined;
+      if (lockBusy(repoRoot, snapshot)) return undefined;
+      rmSync(path, { force: true });
+      if (!createExclusive(path, token)) return undefined;
+    } finally {
+      releaseReclaim();
     }
   }
-  return () => rmSync(path, { force: true });
+  return () => {
+    if (existsSync(path) && readFileSync(path, "utf8") === token) rmSync(path, { force: true });
+  };
 }
 
 // Builds the prompt from the stored conversation text. Keeps the most recent messages

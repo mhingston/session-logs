@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { sessionLogsRoot, snapshotTranscript } from "../src/capture/capture.ts";
@@ -9,6 +9,7 @@ import { pruneSessions } from "../src/maintain/maintain.ts";
 import {
   buildPrompt,
   generateSummary,
+  lockPath,
   MAX_TRANSCRIPT_CHARS,
   readSummary,
   runClaudePrint,
@@ -181,6 +182,28 @@ test("a failed claude run reports exit status only, never its stderr", () => {
     if (previous === undefined) delete process.env.SESSION_LOGS_CLAUDE_BIN;
     else process.env.SESSION_LOGS_CLAUDE_BIN = previous;
   }
+});
+
+test("a stale lock is reclaimed under the reclaim lock, and an old holder cannot release the new one", () => {
+  const repo = tempRepo();
+  const transcript = join(repo, "t.jsonl");
+  writeFileSync(transcript, SAMPLE.join("\n") + "\n");
+  const snapshot = snapshotTranscript(repo, "s1", transcript);
+  const lock = lockPath(repo, snapshot);
+  const oldRelease = tryLock(repo, snapshot);
+  assert.ok(oldRelease, "first caller takes the lock");
+  const aged = new Date(Date.now() - 16 * 60 * 1000);
+  utimesSync(lock, aged, aged);
+  writeFileSync(`${lock}.reclaim`, "other");
+  assert.equal(tryLock(repo, snapshot), undefined, "no takeover while another reclaim is in progress");
+  rmSync(`${lock}.reclaim`);
+  const newRelease = tryLock(repo, snapshot);
+  assert.ok(newRelease, "stale lock is reclaimed");
+  assert.equal(tryLock(repo, snapshot), undefined, "a second caller is refused");
+  oldRelease();
+  assert.equal(existsSync(lock), true, "the old holder does not remove the new holder's lock");
+  newRelease();
+  assert.equal(existsSync(lock), false);
 });
 
 test("a snapshot whose summary is in progress is not generated twice and is kept by prune", () => {
