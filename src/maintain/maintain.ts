@@ -7,6 +7,7 @@ import { activityAt, allActiveSessions, sessionLogsRoot, type Manifest, type Ses
 import { sha256Hex } from "../storage/object-store.ts";
 import { readSnapshotLines, readManifest, commitsForSession, resolveSnapshotId } from "../read/read.ts";
 import { readNote } from "../notes/notes.ts";
+import { lockBusy, tryLock } from "../summaries/summaries.ts";
 
 const HASH_PREFIX = /^[0-9a-f]{4,64}$/;
 
@@ -241,7 +242,9 @@ export function pruneSessions(repoRoot: string, options: PruneOptions): PrunePla
     .filter(([, latest]) => Date.parse(latest) < cutoff)
     .map(([session]) => session)
     .filter((session) => !forkedFrom.has(session))
-    .filter((session) => options.includeLinked || commitsForSession(repoRoot, session).length === 0);
+    .filter((session) => options.includeLinked || commitsForSession(repoRoot, session).length === 0)
+    // A session with a summary in progress is kept for this run (see summaries.ts locks).
+    .filter((session) => !manifests.some((m) => m.manifest.session_id === session && lockBusy(repoRoot, m.snapshot)));
 
   const doomed = new Set(candidates);
   const doomedSnapshots = manifests.filter((m) => doomed.has(m.manifest.session_id));
@@ -262,18 +265,29 @@ export function pruneSessions(repoRoot: string, options: PruneOptions): PrunePla
     return plan;
   }
   const root = sessionLogsRoot(repoRoot);
-  for (const { snapshot } of doomedSnapshots) {
-    rmSync(join(root, "snapshots", `${snapshot}.json`), { force: true });
-    rmSync(join(root, "decisions", `${snapshot}.json`), { force: true });
-    rmSync(join(root, "summaries", `${snapshot}.json`), { force: true });
-    rmSync(join(root, "summaries", `${snapshot}.lock`), { force: true });
-  }
-  for (const session of candidates) {
-    rmSync(join(root, "sessions", `${session}.json`), { force: true });
-    rmSync(join(root, "active", `${session}.json`), { force: true });
-  }
-  for (const name of deadObjects) {
-    rmSync(join(objectDir, name), { force: true });
+  // Hold each doomed snapshot's summary lock while deleting, so no summary is published
+  // for a snapshot that is being removed.
+  const releases: Array<() => void> = [];
+  try {
+    for (const { snapshot } of doomedSnapshots) {
+      const release = tryLock(repoRoot, snapshot);
+      if (!release) throw new Error(`snapshot ${snapshot} has a summary in progress; retry prune`);
+      releases.push(release);
+    }
+    for (const { snapshot } of doomedSnapshots) {
+      rmSync(join(root, "snapshots", `${snapshot}.json`), { force: true });
+      rmSync(join(root, "decisions", `${snapshot}.json`), { force: true });
+      rmSync(join(root, "summaries", `${snapshot}.json`), { force: true });
+    }
+    for (const session of candidates) {
+      rmSync(join(root, "sessions", `${session}.json`), { force: true });
+      rmSync(join(root, "active", `${session}.json`), { force: true });
+    }
+    for (const name of deadObjects) {
+      rmSync(join(objectDir, name), { force: true });
+    }
+  } finally {
+    for (const release of releases) release();
   }
   return plan;
 }

@@ -10,7 +10,7 @@
 // Summaries are model output and are not deterministic. Each record names its snapshot
 // and source content hash, so it can be traced to the transcript version it describes.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +26,8 @@ const CLAUDE_BIN_ENV = "SESSION_LOGS_CLAUDE_BIN";
 // Longer transcripts keep their most recent messages. The record says so.
 export const MAX_TRANSCRIPT_CHARS = 200_000;
 const SUMMARY_TIMEOUT_MS = 5 * 60 * 1000;
+// Must be longer than SUMMARY_TIMEOUT_MS, so a live run never looks stale.
+const LOCK_STALE_MS = 15 * 60 * 1000;
 const SNAPSHOT_ID = /^[0-9a-f]{64}$/;
 
 const INSTRUCTIONS = [
@@ -69,9 +71,48 @@ export function readSummary(repoRoot: string, snapshot: string): SessionSummary 
   return JSON.parse(readFileSync(file, "utf8")) as SessionSummary;
 }
 
+// One lock per snapshot, shared by background workers, the CLI and prune. It is held
+// while the model runs, so prune cannot delete a snapshot that is being summarized, and
+// two callers cannot both call the model for it. A lock older than LOCK_STALE_MS belongs
+// to a dead process and is taken over.
+export class SummaryBusyError extends Error {
+  constructor(snapshot: string) {
+    super(`a summary for snapshot ${snapshot} is already being generated`);
+  }
+}
+
+export function lockPath(repoRoot: string, snapshot: string): string {
+  return summaryPath(repoRoot, snapshot).replace(/\.json$/, ".lock");
+}
+
+export function lockBusy(repoRoot: string, snapshot: string): boolean {
+  const path = lockPath(repoRoot, snapshot);
+  return existsSync(path) && Date.now() - statSync(path).mtimeMs < LOCK_STALE_MS;
+}
+
+// Returns a release function, or undefined when another holder has the lock.
+export function tryLock(repoRoot: string, snapshot: string): (() => void) | undefined {
+  const path = lockPath(repoRoot, snapshot);
+  mkdirSync(summaryDir(repoRoot), { recursive: true });
+  try {
+    closeSync(openSync(path, "wx"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if (lockBusy(repoRoot, snapshot)) return undefined;
+    rmSync(path, { force: true });
+    try {
+      closeSync(openSync(path, "wx"));
+    } catch {
+      return undefined;
+    }
+  }
+  return () => rmSync(path, { force: true });
+}
+
 // Builds the prompt from the stored conversation text. Keeps the most recent messages
-// when the transcript is over the cap.
-export function buildPrompt(lines: string[]): { prompt: string; messages: number; truncated: boolean } {
+// when the transcript is over the cap. `kept` is 0 when even the newest message does
+// not fit.
+export function buildPrompt(lines: string[]): { prompt: string; messages: number; kept: number; truncated: boolean } {
   const messages = lines
     .map((line) => entryToText(line))
     .filter((entry): entry is { role: string; text: string } => entry !== undefined)
@@ -92,12 +133,15 @@ export function buildPrompt(lines: string[]): { prompt: string; messages: number
   return {
     prompt: [INSTRUCTIONS, "", "<transcript>", transcript, "</transcript>", ""].join("\n"),
     messages: messages.length,
+    kept: kept.length,
     truncated,
   };
 }
 
 // Runs Claude Code headless with the prompt on stdin. No tools, no session saved, and
-// the guard variable set so the Stop hook does not capture this run.
+// the guard variable set so the Stop hook does not capture this run. Failures are
+// reported by exit status or signal only: stderr and stdout can quote the transcript,
+// so they are never put in the error.
 export function runClaudePrint(prompt: string): string {
   const bin = process.env[CLAUDE_BIN_ENV] ?? "claude";
   const cwd = mkdtempSync(join(tmpdir(), "session-logs-summary-"));
@@ -112,13 +156,17 @@ export function runClaudePrint(prompt: string): string {
       stdio: ["pipe", "pipe", "pipe"],
     });
     return output.trim();
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { status?: number | null; signal?: string | null };
+    const detail = failure.code ?? (failure.status != null ? `exit ${failure.status}` : failure.signal ?? "unknown");
+    throw new Error(`claude -p failed (${detail})`);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 }
 
 // Returns the stored summary for a snapshot, generating it first if absent. An existing
-// summary is never rewritten.
+// summary is never rewritten. Throws SummaryBusyError when another caller is generating it.
 export function generateSummary(
   repoRoot: string,
   snapshot: string,
@@ -127,29 +175,41 @@ export function generateSummary(
 ): SessionSummary {
   const existing = readSummary(repoRoot, snapshot);
   if (existing) return existing;
-  const manifest = readManifest(repoRoot, snapshot);
-  const lines = readSnapshotLines(repoRoot, snapshot);
-  const built = buildPrompt(lines);
-  let summary = "";
-  if (built.messages > 0) {
-    summary = run(built.prompt);
-    if (summary.length === 0) {
-      throw new Error("the summarizer returned no text");
+  const release = tryLock(repoRoot, snapshot);
+  if (!release) throw new SummaryBusyError(snapshot);
+  try {
+    // Another caller may have finished while this one waited for the lock.
+    const published = readSummary(repoRoot, snapshot);
+    if (published) return published;
+    const manifest = readManifest(repoRoot, snapshot);
+    const lines = readSnapshotLines(repoRoot, snapshot);
+    const built = buildPrompt(lines);
+    let summary = "";
+    if (built.messages > 0) {
+      if (built.kept === 0) {
+        throw new Error("the newest message is larger than the summary limit");
+      }
+      summary = run(built.prompt);
+      if (summary.length === 0) {
+        throw new Error("the summarizer returned no text");
+      }
     }
+    const record: SessionSummary = {
+      schema_version: SUMMARY_SCHEMA_VERSION,
+      generator: "claude-code-print",
+      snapshot,
+      session_id: manifest.session_id,
+      source_content_sha256: sha256Hex(Buffer.from(lines.join("\n") + "\n", "utf8")),
+      truncated: built.truncated,
+      summary,
+      created_at: now.toISOString(),
+    };
+    mkdirSync(summaryDir(repoRoot), { recursive: true });
+    writeFileAtomic(summaryPath(repoRoot, snapshot), JSON.stringify(record, null, 2) + "\n");
+    return record;
+  } finally {
+    release();
   }
-  const record: SessionSummary = {
-    schema_version: SUMMARY_SCHEMA_VERSION,
-    generator: "claude-code-print",
-    snapshot,
-    session_id: manifest.session_id,
-    source_content_sha256: sha256Hex(Buffer.from(lines.join("\n") + "\n", "utf8")),
-    truncated: built.truncated,
-    summary,
-    created_at: now.toISOString(),
-  };
-  mkdirSync(summaryDir(repoRoot), { recursive: true });
-  writeFileAtomic(summaryPath(repoRoot, snapshot), JSON.stringify(record, null, 2) + "\n");
-  return record;
 }
 
 // Starts the summary worker detached, so the Stop hook returns at once. Nothing is
@@ -165,8 +225,4 @@ export function spawnBackgroundSummary(repoRoot: string, snapshot: string): void
     // Spawn failures are not logged. Capture has already succeeded and the hook must not fail.
   });
   child.unref();
-}
-
-export function lockPath(repoRoot: string, snapshot: string): string {
-  return join(summaryDir(repoRoot), `${snapshot}.lock`);
 }

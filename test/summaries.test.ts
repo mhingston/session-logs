@@ -11,7 +11,10 @@ import {
   generateSummary,
   MAX_TRANSCRIPT_CHARS,
   readSummary,
+  runClaudePrint,
   SUMMARIZING_ENV,
+  SummaryBusyError,
+  tryLock,
 } from "../src/summaries/summaries.ts";
 
 const TOOL_ROOT = resolve(new URL(".", import.meta.url).pathname, "..");
@@ -145,4 +148,55 @@ test("prune --apply removes a pruned session's summary; a dry run keeps it", () 
 
   pruneSessions(repo, { ...later, apply: true, includeLinked: false });
   assert.equal(existsSync(file), false);
+});
+
+test("a newest message larger than the cap is rejected before the model is called", () => {
+  const repo = tempRepo();
+  const transcript = join(repo, "t.jsonl");
+  writeFileSync(transcript, entry("assistant", "huge", "y".repeat(MAX_TRANSCRIPT_CHARS + 10)) + "\n");
+  const snapshot = snapshotTranscript(repo, "s1", transcript);
+  assert.throws(
+    () =>
+      generateSummary(repo, snapshot, () => {
+        throw new Error("model must not be called");
+      }),
+    /larger than the summary limit/,
+  );
+});
+
+test("a failed claude run reports exit status only, never its stderr", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fake-claude-fail-"));
+  const bin = join(dir, "fail.sh");
+  writeFileSync(bin, "#!/bin/sh\necho 'TRANSCRIPT-SECRET-TEXT' >&2\nexit 3\n");
+  chmodSync(bin, 0o755);
+  const previous = process.env.SESSION_LOGS_CLAUDE_BIN;
+  process.env.SESSION_LOGS_CLAUDE_BIN = bin;
+  try {
+    assert.throws(() => runClaudePrint("prompt"), (error: Error) => {
+      assert.equal(error.message, "claude -p failed (exit 3)");
+      assert.doesNotMatch(error.message, /TRANSCRIPT-SECRET-TEXT/);
+      return true;
+    });
+  } finally {
+    if (previous === undefined) delete process.env.SESSION_LOGS_CLAUDE_BIN;
+    else process.env.SESSION_LOGS_CLAUDE_BIN = previous;
+  }
+});
+
+test("a snapshot whose summary is in progress is not generated twice and is kept by prune", () => {
+  const repo = tempRepo();
+  const transcript = join(repo, "t.jsonl");
+  writeFileSync(transcript, SAMPLE.join("\n") + "\n");
+  const snapshot = snapshotTranscript(repo, "s1", transcript);
+  const release = tryLock(repo, snapshot);
+  assert.ok(release, "first caller takes the lock");
+  try {
+    assert.throws(() => generateSummary(repo, snapshot, () => "second"), SummaryBusyError);
+    const later = { olderThanDays: 1, now: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000) };
+    assert.deepEqual(pruneSessions(repo, { ...later, apply: true, includeLinked: false }).sessions, []);
+    assert.equal(existsSync(join(sessionLogsRoot(repo), "snapshots", `${snapshot}.json`)), true);
+  } finally {
+    release();
+  }
+  assert.equal(generateSummary(repo, snapshot, () => "after release").summary, "after release");
 });

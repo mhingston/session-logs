@@ -133,7 +133,9 @@ LLM summaries are a separate opt-in layer. They are off by default and are not t
 
 - **Model:** Claude Code itself, run headless (`claude -p`). It uses the login you already have for Claude Code. session-logs makes no other network call for summaries.
 - **Input:** only the stored, redacted `user` and `assistant` text of the snapshot (D24, D44). Redaction is best effort, and a summary can still repeat anything that survived it. Transcripts over 200,000 characters keep their most recent messages, and the record says so.
-- **Trigger:** the Stop hook starts a detached worker, so the hook returns at once. The worker writes `.session-logs/summaries/<snapshot>.json`. Failures go to `errors.log` as error text only. A snapshot that already has a summary is not summarized again. A lock file stops two workers from calling the model for the same snapshot.
+- **Trigger:** the Stop hook starts a detached worker, so the hook returns at once. The worker writes `.session-logs/summaries/<snapshot>.json`. Failures go to `errors.log` as error text only, with the exit status or signal and never the model's stderr or output. A snapshot that already has a summary is not summarized again.
+- **Locking:** a per-snapshot lock file is held while the model runs. Workers, `sessions summary` and `prune` all use it. Two callers never call the model for the same snapshot, and `prune` skips a session whose summary is in progress. A lock older than 15 minutes is treated as left behind by a dead process.
+- **Size limit:** if even the newest message is over 200,000 characters, no summary is made and the error is logged.
 - **Recursion guard:** the summarizer's own run sets `SESSION_LOGS_SUMMARIZING=1`, and the Stop hook ignores any run that has it. The run uses no tools, saves no session, and starts in a temporary directory.
 - **Not deterministic:** the output is model text. Each record names its snapshot and the source content hash, so you can trace it to the transcript version it describes. Treat it as a draft and check it against the transcript.
 
