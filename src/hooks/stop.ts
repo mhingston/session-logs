@@ -6,6 +6,7 @@ import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { recordActiveSession, sessionLogsRoot, snapshotTranscript } from "../capture/capture.ts";
 import { decisionsEnabled, generateDecisions } from "../decisions/decisions.ts";
+import { spawnBackgroundSummary, summariesEnabled, SUMMARIZING_ENV } from "../summaries/summaries.ts";
 
 interface StopInput {
   session_id: string;
@@ -36,6 +37,9 @@ function logError(repoRoot: string, message: string): void {
 }
 
 function main(): void {
+  // Skip the summarizer's own headless run (see src/summaries/summaries.ts), so it is
+  // never captured or summarized.
+  if (process.env[SUMMARIZING_ENV] === "1") return;
   let repoRoot = resolveRepoRoot(process.cwd());
   let snapshot: string | undefined;
   try {
@@ -63,6 +67,16 @@ function main(): void {
       }
     } catch (error) {
       logError(repoRoot, `decisions: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  // Summaries are opt-in (P1) and run in a detached worker so the hook returns at once.
+  if (snapshot !== undefined) {
+    try {
+      if (summariesEnabled(repoRoot)) {
+        spawnBackgroundSummary(repoRoot, snapshot);
+      }
+    } catch (error) {
+      logError(repoRoot, `summaries: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   process.exitCode = 0;
