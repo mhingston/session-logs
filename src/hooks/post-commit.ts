@@ -5,7 +5,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { sessionLogsRoot } from "../capture/capture.ts";
 import { syncNote } from "../notes/notes.ts";
-import { pushCommit } from "../remote/remote.ts";
+import { describeError, pushCommit } from "../remote/remote.ts";
 
 function logLine(repoRoot: string, message: string): void {
   try {
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
       logLine(repoRoot, `remote: ${skipped.snapshot} not pushed: ${skipped.reason}`);
     }
   } catch (error) {
-    logLine(repoRoot, `remote: ${error instanceof Error ? error.message : String(error)}`);
+    logLine(repoRoot, `remote: ${describeError(error)}`);
   }
   process.exitCode = 0;
 }

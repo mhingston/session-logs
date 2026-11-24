@@ -212,7 +212,7 @@ Remote storage is off by default. When enabled, the post-commit hook pushes the 
 }
 ```
 
-- **Auth:** Entra ID through `DefaultAzureCredential` (for example `az login`). No account keys or SAS tokens. Your identity needs Storage Blob Data Contributor on the container to push and Storage Blob Data Reader to fetch. `accountUrl` must be the bare account URL; a path, query string or credentials are rejected.
+- **Auth:** by default, Entra ID through `DefaultAzureCredential` (for example `az login`). Your identity then needs Storage Blob Data Contributor on the container to push and Storage Blob Data Reader to fetch. Alternatively, set `SESSION_LOGS_AZURE_SAS` in your shell to a SAS token (the query string, starting `sp=` or `?sp=`); it is used instead of Entra ID. The token is read from the environment only and is never written to `config.json` or the repository. Set it per session, for example `export SESSION_LOGS_AZURE_SAS='sv=...&sig=...'`. Account keys are not supported. `accountUrl` must be the bare account URL; a path, query string or credentials there are rejected.
 - **Push:** runs in the post-commit hook. Failures are logged to `.session-logs/errors.log` (error text only) and never block the commit. The hook waits for the upload, so a slow connection delays it.
 - **Redaction gate (D24):** a snapshot with redactions is not pushed and is logged. `sessions remote push <rev> --allow-redacted` overrides this; the override is logged by count only.
 - **Fetch:** on a clone, `sessions remote fetch <rev>` brings in the transcript snapshots that commit's trailers name, plus their summaries and decision extracts. Every object's hash is verified.

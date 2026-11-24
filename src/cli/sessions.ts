@@ -10,7 +10,7 @@ import { sessionLogsRoot } from "../capture/capture.ts";
 import { doctor, forkSession, pruneSessions } from "../maintain/maintain.ts";
 import { decisionsEnabled, generateDecisions } from "../decisions/decisions.ts";
 import { generateSummary, summariesEnabled } from "../summaries/summaries.ts";
-import { fetchCommit, pushCommit } from "../remote/remote.ts";
+import { describeError, fetchCommit, pushCommit } from "../remote/remote.ts";
 import { readNote, rebuildNotes } from "../notes/notes.ts";
 
 function git(args: string[]): string | undefined {
@@ -262,7 +262,7 @@ async function main(argv: string[]): Promise<void> {
         return;
       }
     } catch (error) {
-      console.error(`sessions: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`sessions: ${describeError(error)}`);
       process.exitCode = 1;
       return;
     }

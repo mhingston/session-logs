@@ -33,13 +33,28 @@ export function containerFromSdk(container: ContainerClient): BlobContainerLike 
   };
 }
 
-// Opens a container using Entra ID (DefaultAzureCredential), not account keys.
-// Construction does not contact Azure; the first request does.
-export function openAzureContainer(accountUrl: string, containerName: string): BlobContainerLike {
+// Builds the container URL. A SAS token is appended as a query string and used instead of
+// Entra ID. The token must come from the environment, never from config.json or the repo.
+export function azureContainerUrl(accountUrl: string, containerName: string, sasToken?: string): string {
   const url = new URL(accountUrl);
   if (url.protocol !== "https:") {
     throw new Error("Azure account URL must use https");
   }
-  const credential = new DefaultAzureCredential();
-  return containerFromSdk(new ContainerClient(`${url.origin}/${containerName}`, credential));
+  const base = `${url.origin}/${containerName}`;
+  if (sasToken === undefined) return base;
+  const query = sasToken.replace(/^\?/, "");
+  if (!query.includes("sig=")) {
+    throw new Error("SAS token must be a query string containing sig=");
+  }
+  return `${base}?${query}`;
+}
+
+// Opens a container. With a SAS token the SAS authorises requests; otherwise Entra ID
+// (DefaultAzureCredential) is used, not account keys. Construction does not contact Azure.
+export function openAzureContainer(accountUrl: string, containerName: string, sasToken?: string): BlobContainerLike {
+  const url = azureContainerUrl(accountUrl, containerName, sasToken);
+  const client = sasToken === undefined
+    ? new ContainerClient(url, new DefaultAzureCredential())
+    : new ContainerClient(url);
+  return containerFromSdk(client);
 }

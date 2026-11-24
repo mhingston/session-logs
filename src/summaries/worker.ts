@@ -4,7 +4,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { sessionLogsRoot } from "../capture/capture.ts";
-import { pushIfLinked } from "../remote/remote.ts";
+import { describeError, pushIfLinked } from "../remote/remote.ts";
 import { generateSummary, SummaryBusyError } from "./summaries.ts";
 
 function logError(repoRoot: string, message: string): void {
@@ -34,7 +34,7 @@ async function main(): Promise<void> {
   try {
     await pushIfLinked(repoRoot, snapshot);
   } catch (error) {
-    logError(repoRoot, `remote: ${error instanceof Error ? error.message : String(error)}`);
+    logError(repoRoot, `remote: ${describeError(error)}`);
   }
 }
 

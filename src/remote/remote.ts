@@ -35,6 +35,16 @@ export function openRemote(repoRoot: string): ObjectStore | undefined {
   return createRemoteStore(remoteConfig(repoRoot));
 }
 
+// Error text for logs and CLI output. SDK errors often have an empty message, so the
+// name and HTTP status are included. Remote error text never includes transcript content.
+export function describeError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const status = (error as { statusCode?: unknown }).statusCode;
+  return [error.name, typeof status === "number" ? String(status) : undefined, error.message]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function snapshotsOf(repoRoot: string, rev: string): string[] {
   return snapshotsForCommit(repoRoot, rev)
     .map((pair) => pair.snapshot)

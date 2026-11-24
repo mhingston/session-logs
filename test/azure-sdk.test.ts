@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RestError, type BlockBlobClient } from "@azure/storage-blob";
-import { blobFromSdk, openAzureContainer } from "../src/storage/azure-sdk.ts";
+import { azureContainerUrl, blobFromSdk, openAzureContainer } from "../src/storage/azure-sdk.ts";
 
 // Stub of the SDK block blob client surface used by blobFromSdk.
 function sdkClient(options: {
@@ -65,4 +65,16 @@ test("openAzureContainer returns blob handles without contacting Azure", () => {
   assert.equal(typeof blob.exists, "function");
   assert.equal(typeof blob.upload, "function");
   assert.equal(typeof blob.download, "function");
+});
+
+test("a SAS token is appended to the container URL; bad tokens and non-https are rejected", () => {
+  const account = "https://acct.blob.core.windows.net";
+  assert.equal(
+    azureContainerUrl(account, "c", "?sp=r&sig=fabricated"),
+    "https://acct.blob.core.windows.net/c?sp=r&sig=fabricated",
+  );
+  assert.equal(azureContainerUrl(account, "c"), "https://acct.blob.core.windows.net/c");
+  assert.throws(() => azureContainerUrl(account, "c", "sp=r"), /sig=/);
+  assert.throws(() => azureContainerUrl("http://acct.blob.core.windows.net", "c", "sp=r&sig=x"), /https/);
+  assert.doesNotThrow(() => openAzureContainer(account, "c", "sp=r&sig=fabricated"));
 });

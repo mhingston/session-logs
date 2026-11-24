@@ -20,6 +20,9 @@ export interface RemoteDeps {
   azureContainer?: () => BlobContainerLike;
 }
 
+// Optional SAS token for Azure Blob. Read from the environment only, never from config.
+export const AZURE_SAS_ENV = "SESSION_LOGS_AZURE_SAS";
+
 export function createRemoteStore(
   config: RemoteConfig,
   deps: RemoteDeps = {},
@@ -30,7 +33,7 @@ export function createRemoteStore(
   if (config.provider === "azure-blob") {
     const container = deps.azureContainer
       ? deps.azureContainer()
-      : openAzureContainer(config.accountUrl, config.container);
+      : openAzureContainer(config.accountUrl, config.container, process.env[AZURE_SAS_ENV]);
     return new AzureBlobStore({ container, prefix: config.prefix });
   }
   throw new Error("unsupported remote provider");
